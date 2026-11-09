@@ -28,7 +28,7 @@ All logic is pure and DOM-free (UMD: `window.SupX` in the browser, `require` in 
 Write the failing test first, see it fail, then implement. Commit red and green separately when that's practical.
 
 - `npm test`: unit tests (node:test) in `tests/unit/`.
-- `npm run test:e2e`: builds, then runs Playwright in `tests/e2e/`. `PW_CHANNEL=chrome` uses an installed Chrome; `PW_CHROME=<path>` a specific binary.
+- `npm run test:e2e`: builds, then runs Playwright in `tests/e2e/`. `PW_CHANNEL=chrome` uses an installed Chrome; `PW_CHROME=<path>` a specific Chromium binary. Tests run in Chromium and WebKit; `--project=desktop` runs Chromium only.
 - Run both before committing.
 - `tests/unit/gm-geomorph.test.js` compares with geomorph 4.1.1. The tolerance on aligned coordinates reflects geomorph's own stopping rule (at most a few iterations). Don't loosen it to get a test to pass; find out why it differs.
 - Reference data: `node tests/fixtures/make-synthetic.js`, then `Rscript tests/fixtures/geomorph-reference.R`. The fixtures are invented shapes, to keep third-party data out of the repo.

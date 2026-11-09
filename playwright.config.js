@@ -16,10 +16,17 @@ module.exports = defineConfig({
     trace: 'retain-on-failure',
     // Set PW_CHANNEL=chrome to use an installed Google Chrome instead of Playwright's Chromium.
     channel: process.env.PW_CHANNEL || undefined,
-    launchOptions: process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {},
   },
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1400, height: 900 } } },
+    {
+      name: 'desktop',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1400, height: 900 },
+        launchOptions: process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {},
+      },
+    },
+    { name: 'webkit', use: { ...devices['Desktop Safari'], viewport: { width: 1400, height: 900 } } },
   ],
   webServer: {
     command: `node scripts/serve.mjs ${PORT}`,

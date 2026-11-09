@@ -24,4 +24,13 @@ one <- function(file) {
   )
 }
 out <- list(two = one("tests/fixtures/synthetic-2d.tps"), three = one("tests/fixtures/synthetic-3d.tps"))
+
+# Thin-plate spline: from the consensus to the first specimen, at a few arbitrary points
+query <- rbind(c(0, 0), c(0.1, -0.2), c(-0.3, 0.25), c(0.45, 0.1), c(-0.6, -0.5))
+source_shape <- matrix(unlist(out$two$consensus), ncol = 2, byrow = FALSE)
+target_shape <- matrix(unlist(out$two$aligned_first), ncol = 2, byrow = FALSE)
+out$tps <- list(
+  source = source_shape, target = target_shape, query = query,
+  warped = geomorph:::tps2d(query, source_shape, target_shape)
+)
 write_json(out, "tests/fixtures/geomorph-reference.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")

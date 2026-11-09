@@ -305,3 +305,171 @@ test('exported figures carry links but nothing from editing', () => {
   assert.equal(pathOf(s, 'wire').length, 1);
   assert.equal(count(s, /class="lm-hit"|class="link-start"/g), 0);
 });
+
+/* ---------- specimen styles ---------- */
+const KEYS = ['a', 'b', 'c', 'd'];
+const G = { levels: ['N', 'S'], index: [0, 0, 1, -1], name: 's' };
+
+test('resolveStyles: without groups everything is the first colour and a circle', () => {
+  assert.deepEqual(PL.resolveStyles(KEYS, undefined, {}).map(s => [s.colour, s.marker]), KEYS.map(() => [0, 0]));
+});
+
+test('resolveStyles: style follows the group, ungrouped specimens are grey circles', () => {
+  const s = PL.resolveStyles(KEYS, G, {});
+  assert.deepEqual(s.map(x => [x.colour, x.marker]), [[0, 0], [0, 0], [1, 1], ['muted', 0]]);
+  assert.ok(s.every(x => !x.overridden));
+});
+
+test('resolveStyles: an override changes only what it names, and is marked', () => {
+  const s = PL.resolveStyles(KEYS, G, { b: { marker: 3 }, c: { colour: '#123456' } });
+  assert.deepEqual([s[1].colour, s[1].marker, s[1].overridden], [0, 3, true]);
+  assert.deepEqual([s[2].colour, s[2].marker, s[2].overridden], ['#123456', 1, true]);
+});
+
+test('colourValue: palette positions follow the theme, custom colours do not', () => {
+  assert.equal(PL.colourValue(1, PL.THEMES.dark), PL.THEMES.dark.series[1]);
+  assert.equal(PL.colourValue('#123456', PL.THEMES.dark), '#123456');
+  assert.equal(PL.colourValue('muted', PL.THEMES.light), PL.THEMES.light.muted);
+});
+
+test('there are eight named markers', () => {
+  assert.equal(PL.MARKER_NAMES.length, 8);
+  assert.equal(new Set(PL.MARKER_NAMES).size, 8);
+});
+
+test('markerIcon draws a small stand-alone mark', () => {
+  const s = PL.markerIcon({ colour: 1, marker: 2 }, PL.THEMES.light);
+  wellFormed(s);
+  assert.ok(s.includes(PL.THEMES.light.series[1]));
+  assert.match(s, /<polygon/);
+});
+
+test('scatter: styles decide colour and marker', () => {
+  const s = PL.scatter(Object.assign(base(), { styles: [{ colour: '#123456', marker: 3 }, { colour: 0, marker: 0 }, { colour: 0, marker: 0 }, { colour: 0, marker: 0 }] }));
+  wellFormed(s);
+  assert.ok(s.includes('#123456'));
+  assert.equal(count(s, /<polygon/g), 1);
+});
+
+const styled = marker => res.prep.specimens.map((_, i) => ({ colour: i === 0 ? '#123456' : 0, marker: i === 0 ? marker : 0 }));
+
+test('superimposition: a specimen’s marker is drawn at each of its points', () => {
+  const s = PL.superimposition(sup({ styles: styled(1) }));
+  wellFormed(s);
+  assert.ok(s.includes('#123456'));
+  const shaped = pathOf(s, 'cloud').find(d => d.includes('z'));
+  assert.equal((shaped.match(/z/g) || []).length, 5);
+  assert.equal(count(s, /M[-\d.]+ [-\d.]+h0/g), 5 * 5);
+});
+
+test('superimposition: group markers now appear in the cloud itself', () => {
+  const s = PL.superimposition(sup({ groups: { levels: ['N', 'S'], index: [0, 0, 0, 1, 1, 1], name: 's' } }));
+  assert.ok(pathOf(s, 'cloud').some(d => d.includes('z')));
+  assert.equal(count(s, /M[-\d.]+ [-\d.]+h0/g), 3 * 5);
+});
+
+test('raw data: styles apply to the points and the outlines', () => {
+  const s = PL.rawData(raw({ styles: styled(2) }));
+  wellFormed(s);
+  assert.ok(pathOf(s, 'cloud').some(d => d.includes('z')));
+  assert.ok(s.includes('stroke="#123456"'));
+});
+
+test('raw data: links take each specimen’s colour', () => {
+  const s = PL.rawData(raw({ styles: styled(0), links: LINKS }));
+  assert.equal(pathOf(s, 'wire').length, 2);
+  assert.ok(s.includes('stroke="#123456"'));
+});
+
+test('several specimens can be selected at once', () => {
+  assert.equal(count(PL.superimposition(sup({ selected: ['A', 'C'] })), /class="selected"/g), 10);
+  assert.equal(count(PL.scatter(Object.assign(base(), { selected: ['a', 'c'] })), /class="pt-label"/g), 2);
+});
+
+/* ---------- picking in the plot ---------- */
+test('pixelToData inverts the scatter’s scale', () => {
+  const o = Object.assign(base(), { width: 600, height: 400 });
+  const s = PL.scatter(o);
+  const map = s.match(/data-map="([^"]+)"/)[1];
+  const hit = s.match(/class="hit" cx="([\d.]+)" cy="([\d.]+)"/);
+  const [x, y] = PL.pixelToData(map, Number(hit[1]), Number(hit[2]));
+  near(x, 1, 0.01);
+  near(y, 2, 0.01);
+});
+
+test('pixelToData returns null outside the plot area', () => {
+  const map = PL.scatter(base()).match(/data-map="([^"]+)"/)[1];
+  assert.equal(PL.pixelToData(map, 2, 2), null);
+});
+
+test('scatter: theoretical positions are marked and named', () => {
+  const s = PL.scatter(Object.assign(base(), { virtual: [{ x: 2, y: 2, label: 'Theoretical' }] }));
+  wellFormed(s);
+  assert.equal(count(s, /class="virtual"/g), 1);
+  assert.match(s, /Theoretical/);
+});
+
+/* ---------- shape options ---------- */
+const moved = () => res.gpa.consensus.map(p => p.map(v => v * 1.2));
+const identity = q => q.slice();
+
+test('shape change: the target can take a specimen’s colour', () => {
+  const s = PL.shapeChange({ mean: res.gpa.consensus, target: moved(), rows: res.prep.rows, theme: PL.THEMES.light, targetColour: '#123456' });
+  assert.ok(s.includes('fill="#123456"'));
+});
+
+test('shape change with a warp draws a grid instead of arrows and the mean', () => {
+  const s = PL.shapeChange({ mean: res.gpa.consensus, target: moved(), rows: res.prep.rows, theme: PL.THEMES.light, warp: identity });
+  wellFormed(s);
+  assert.equal(pathOf(s, 'tps-grid').length, 1);
+  assert.equal(count(s, /class="arrow"/g), 0);
+  assert.equal(count(s, /class="mean"/g), 0);
+  assert.equal(count(s, /class="target"/g), 5);
+});
+
+test('the grid follows the warp', () => {
+  const a = PL.shapeChange({ mean: res.gpa.consensus, target: moved(), rows: res.prep.rows, theme: PL.THEMES.light, warp: identity });
+  const b = PL.shapeChange({ mean: res.gpa.consensus, target: moved(), rows: res.prep.rows, theme: PL.THEMES.light, warp: q => [q[0] + 0.3 * Math.sin(6 * q[1]), q[1]] });
+  assert.notEqual(pathOf(a, 'tps-grid')[0], pathOf(b, 'tps-grid')[0]);
+});
+
+test('the grid has straight lines for an identity warp and covers the shape', () => {
+  const s = PL.shapeChange({ mean: res.gpa.consensus, target: res.gpa.consensus, rows: res.prep.rows, theme: PL.THEMES.light, warp: identity });
+  const d = pathOf(s, 'tps-grid')[0];
+  assert.ok((d.match(/M/g) || []).length >= 10, 'several lines');
+  assert.doesNotMatch(d, /NaN/);
+});
+
+const tile = (label, over) => Object.assign({ target: moved(), label }, over);
+const grid = (n, over) => PL.shapeGrid(Object.assign({ items: Array.from({ length: n }, (_, i) => tile(`S${i}`)), mean: res.gpa.consensus, rows: res.prep.rows, theme: PL.THEMES.light, width: 480 }, over));
+
+test('shapeGrid draws each selected specimen in one figure', () => {
+  const s = grid(4);
+  wellFormed(s);
+  assert.equal(count(s, /class="target"/g), 4 * 5);
+  for (const n of ['S0', 'S1', 'S2', 'S3']) assert.ok(s.includes(`>${n}<`), n);
+});
+
+test('shapeGrid arranges one specimen large and more in two columns', () => {
+  const size = s => Number(s.match(/height="(\d+)"/)[1]);
+  assert.ok(size(grid(3)) > size(grid(2)), 'three need two rows');
+  assert.equal(size(grid(3)), size(grid(4)));
+  assert.ok(size(grid(1)) > size(grid(2)), 'one fills the width');
+});
+
+test('shapeGrid uses one column on a narrow screen', () => {
+  const size = s => Number(s.match(/height="(\d+)"/)[1]);
+  assert.ok(size(grid(2, { width: 300 })) > size(grid(2, { width: 480 })) * 0.9);
+});
+
+test('shapeGrid passes on links, colours and warps', () => {
+  const s = PL.shapeGrid({ items: [tile('A', { colour: '#123456', warp: identity })], mean: res.gpa.consensus, rows: res.prep.rows, theme: PL.THEMES.light, width: 480, links: LINKS });
+  wellFormed(s);
+  assert.equal(pathOf(s, 'tps-grid').length, 1);
+  assert.equal(pathOf(s, 'wire-target').length, 1);
+  assert.ok(s.includes('#123456'));
+});
+
+test('shapeGrid with nothing selected is empty', () => {
+  assert.equal(PL.shapeGrid({ items: [], mean: res.gpa.consensus, rows: res.prep.rows, theme: PL.THEMES.light }), '');
+});
