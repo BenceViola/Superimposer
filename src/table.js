@@ -112,7 +112,10 @@
     return csv(head, rows.map(r => [
       r.key, r.id, r.replicate, r.operator, r.source, r.units, r.use ? 'yes' : 'no', num(r.csize), num(r.dist), r.missing, r.notDone, r.estimated,
       ...groupColumns.map(c => r.groups[c] || ''),
-      ...(opts.coords ? pointRows.flatMap((_, i) => axes.map((__, d) => (r.coords[i] ? num(r.coords[i][d]) : 'NA'))) : []),
+      ...(opts.coords ? pointRows.flatMap((p, i) => axes.map((_, d) => {
+        const c = r.coords[p.at == null ? i : p.at];
+        return c ? num(c[d]) : 'NA';
+      })) : []),
     ]));
   }
 

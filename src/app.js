@@ -2,7 +2,7 @@
 // All calculation is in io.js, gm.js, exports.js and plots.js.
 (function () {
   'use strict';
-  const LK = window.SupLinks, IO = window.SupIO, GM = window.SupGM, EX = window.SupExport, PL = window.SupPlots, EXAMPLE = window.SupExample;
+  const TB = window.SupTable, LK = window.SupLinks, IO = window.SupIO, GM = window.SupGM, EX = window.SupExport, PL = window.SupPlots, EXAMPLE = window.SupExample;
   const $ = id => document.getElementById(id);
   const on = (el, ev, fn) => el.addEventListener(ev, fn);
   const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -17,11 +17,12 @@
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
     colour: '', labels: true, hulls: false, equal: true,
     links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
+    dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, autoData: false,
     fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0,
     picked: [], analysisSig: '', shapeMode: 'axis', shapeStyle: 'arrows', styles: {}, styleKey: null,
     view: IDENTITY.map(r => r.slice()),
   };
-  window.__sup = { S };
+  window.__sup = { S, TB };
 
   const optsNow = () => ({ missing: S.missing, replicates: S.replicates, semilandmarks: S.semilandmarks, flip: S.flip, excludeSpecimens: S.excludeSpecimens, excludePoints: S.excludePoints });
   const theme = () => {
@@ -55,6 +56,11 @@
   // Remembered per landmark set in this browser, as a convenience; saving a file is the way to share them.
   const storeKey = sig => `superimposer:links:${sig}`;
   const styleKey = sig => `superimposer:styles:${sig}`;
+  const groupKey = sig => `superimposer:groups:${sig}`;
+  function writeGroups() {
+    if (!S.linkSig || !S.table) return;
+    try { localStorage.setItem(groupKey(S.linkSig), JSON.stringify(S.table)); } catch { /* see writeStored */ }
+  }
   function readJson(key, fallback) {
     try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
   }
@@ -79,6 +85,10 @@
     S.linkSig = sig;
     S.links = sig ? readJson(storeKey(sig), []) : [];
     S.styles = sig ? readJson(styleKey(sig), {}) : {};
+    if (sig && !S.table) {
+      S.table = readJson(groupKey(sig), null);
+      if (S.table) S.tableReport = 'Group columns remembered from your last session in this browser.';
+    }
     S.linkStart = null;
     S.linkReport = '';
   }
@@ -130,7 +140,8 @@
     $('empty').hidden = has;
     $('side').hidden = !has;
     const ok = !!(S.res && S.res.ok);
-    $('results').hidden = !ok;
+    const shown = !!(S.dataset && S.dataset.specimens.length);
+    $('results').hidden = !shown;
     $('message').hidden = !(S.res && !S.res.ok);
     if (S.res && !S.res.ok) $('message').textContent = S.res.message;
     if (!S.res && has) { $('message').hidden = false; $('message').textContent = 'None of the files could be used. The notes on the left say why.'; }
@@ -140,7 +151,119 @@
     $('bGroups').disabled = !S.all.length;
     if (!has) return;
     renderSide();
+    if (shown) showPanels(ok);
     if (ok) renderFigures();
+    if (shown && S.tab === 'data') renderDataTable();
+  }
+
+  /** Which tabs can be opened. The data table always can; it is where to look when an analysis fails. */
+  function showPanels(ok) {
+    if (!ok) { if (S.tab !== 'data') S.autoData = true; S.tab = 'data'; }
+    else if (S.autoData) { S.autoData = false; S.tab = 'super'; }
+    if (ok && !S.fitted && NEEDS_FIT.includes(S.tab)) S.tab = 'super';
+    document.querySelectorAll('.tab').forEach(b => {
+      const tab = b.dataset.tab;
+      const blocked = tab === 'data' ? '' : !ok ? 'Not enough data to analyse' : NEEDS_FIT.includes(tab) && !S.fitted ? 'Run the Procrustes fit first' : '';
+      b.disabled = !!blocked;
+      b.title = blocked;
+      b.classList.toggle('on', tab === S.tab);
+      b.setAttribute('aria-selected', tab === S.tab);
+    });
+    document.querySelectorAll('.panel').forEach(p => { p.hidden = p.dataset.panel !== S.tab; });
+  }
+
+  /* ---------- data table ---------- */
+  const groupColumns = () => (S.table ? S.table.columns.filter(c => c !== TB.idColumn(S.table)) : []);
+  const pointColumns = () => S.dataset.rows.map((r, at) => Object.assign({}, r, { at })).filter(r => r.type !== 'curve' || S.semilandmarks);
+  function visibleRows() {
+    const all = TB.buildRows(S.dataset, S.res, S.table, S.excludeSpecimens, { fitted: S.fitted, semilandmarks: S.semilandmarks });
+    const shown = TB.filterRows(all, S.dtFilter);
+    return { all, rows: S.dtSort ? TB.sortRows(shown, S.dtSort.col, S.dtSort.dir) : shown };
+  }
+
+  function renderDataTable() {
+    const active = document.activeElement;
+    const focus = active && active.classList && active.classList.contains('dt-cell') ? { key: active.dataset.key, col: active.dataset.col, at: active.selectionStart } : null;
+    const known = new Set(S.dataset.specimens.map(s => s.key));
+    S.dtSelected = new Set([...S.dtSelected].filter(k => known.has(k)));
+    const { all, rows } = visibleRows();
+    S.dtRows = rows;
+    const groups = groupColumns();
+    const points = S.dtCoords ? pointColumns() : [];
+    const axes = ['x', 'y', 'z'].slice(0, S.dataset.dim);
+    const options = colourOptions();
+    const styleByKey = new Map(S.dataset.specimens.map((s, i, list) => [s.key, PL.resolveStyles(list.map(x => x.key), currentGroups(options, list), S.styles)[i]]));
+    const th = theme();
+    const arrow = col => (S.dtSort && S.dtSort.col === col ? (S.dtSort.dir > 0 ? ' ▲' : ' ▼') : '');
+    const head = (col, label) => `<button type="button" data-sort="${esc(col)}">${esc(label)}${arrow(col)}</button>`;
+    const BASE = [['replicate', 'Rep.'], ['operator', 'Operator'], ['source', 'Source'], ['units', 'Units'], ['csize', 'Centroid size'], ['dist', 'Proc. distance'], ['missing', 'Missing'], ['notDone', 'Not done'], ['estimated', 'Estimated']];
+    const numCell = (v, text, c, extra) => `<td class="n ${extra || ''}" data-c="${c}">${v == null || v === 0 ? '' : text}</td>`;
+
+    const lines = rows.map(r => {
+      const coordCells = points.flatMap(p => axes.map((a, d) => {
+        const c = r.coords[p.at], name = `${p.id}_${a}`;
+        const est = r.status[p.at] === 'estimated' ? 'dt-est' : '';
+        return c ? `<td class="n ${est}" data-c="${esc(name)}">${c[d].toFixed(3)}</td>` : `<td class="dt-gap" data-c="${esc(name)}">–</td>`;
+      })).join('');
+      return `<tr data-key="${esc(r.key)}" class="${S.dtSelected.has(r.key) ? 'ticked' : ''} ${r.use ? '' : 'left-out'}">`
+        + `<td class="fix f0"><input type="checkbox" class="dt-select" ${S.dtSelected.has(r.key) ? 'checked' : ''} aria-label="Tick ${esc(r.key)}"></td>`
+        + `<td class="fix f1"><input type="checkbox" class="dt-use" ${r.use ? 'checked' : ''} aria-label="Use ${esc(r.key)} in the analysis"></td>`
+        + `<td class="fix f2"><button class="mk" type="button" aria-label="Change the marker of ${esc(r.key)}" title="Change marker">${PL.markerIcon(styleByKey.get(r.key), th)}</button></td>`
+        + `<td class="fix f3">${esc(r.key)}</td>`
+        + groups.map((g, i) => `<td class="g"><input class="dt-cell" data-key="${esc(r.key)}" data-col="${esc(g)}" list="dl-${i}" value="${esc(r.groups[g] || '')}" aria-label="${esc(g)} of ${esc(r.key)}"></td>`).join('')
+        + `<td class="n" data-c="replicate">${r.replicate}</td><td data-c="operator">${esc(r.operator)}</td><td data-c="source">${esc(r.source)}</td><td data-c="units">${esc(unitWord(r.units))}</td>`
+        + numCell(r.csize, r.csize == null ? '' : r.csize.toPrecision(5), 'csize')
+        + numCell(r.dist, r.dist == null ? '' : r.dist.toFixed(4), 'dist')
+        + numCell(r.missing, r.missing, 'missing', r.missing ? 'has-gap' : '')
+        + numCell(r.notDone, r.notDone, 'notDone', r.notDone ? 'has-gap' : '')
+        + numCell(r.estimated, r.estimated, 'estimated')
+        + coordCells + '</tr>';
+    }).join('');
+
+    const allTicked = rows.length > 0 && rows.every(r => S.dtSelected.has(r.key));
+    $('dataTable').innerHTML = `<thead><tr><th class="fix f0"><input type="checkbox" id="dtSelectAll" ${allTicked ? 'checked' : ''} aria-label="Tick all rows shown"></th>`
+      + '<th class="fix f1" title="Use in the analysis">Use</th><th class="fix f2"></th>'
+      + `<th class="fix f3">${head('key', 'Specimen')}</th>`
+      + groups.map(g => `<th class="dt-group">${head(`group:${g}`, g)}<button type="button" class="x ${S.dtArmed === g ? 'armed' : ''}" data-remove="${esc(g)}" aria-label="Remove column ${esc(g)}">${S.dtArmed === g ? 'Remove?' : '×'}</button></th>`).join('')
+      + BASE.map(([c, l]) => `<th>${head(c, l)}</th>`).join('')
+      + points.flatMap(p => axes.map(a => `<th>${esc(p.id)}_${a}</th>`)).join('')
+      + `</tr></thead><tbody>${lines}</tbody>`;
+    const headBox = $('dtSelectAll');
+    if (headBox) headBox.indeterminate = !allTicked && rows.some(r => S.dtSelected.has(r.key));
+
+    $('dtLists').innerHTML = groups.map((g, i) => {
+      const levels = [...new Set(all.map(r => r.groups[g]).filter(Boolean))].sort();
+      return `<datalist id="dl-${i}">${levels.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+    }).join('');
+    const bulk = $('dtBulkCol'), keep = bulk.value;
+    bulk.innerHTML = groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
+    if (groups.includes(keep)) bulk.value = keep;
+    const bulkLevels = [...new Set(all.map(r => r.groups[bulk.value]).filter(Boolean))].sort();
+    $('dtBulkList').innerHTML = bulkLevels.map(v => `<option value="${esc(v)}">`).join('');
+    $('bBulk').disabled = !groups.length || !S.dtSelected.size;
+    $('bSaveGroups').disabled = !groups.length;
+    $('chkCoords').checked = S.dtCoords;
+    $('dtCount').textContent = `${rows.length} of ${plural(all.length, 'record')}${S.dtSelected.size ? ` · ${S.dtSelected.size} selected` : ''}`;
+    $('dtHint').textContent = S.dtMessage || (S.dtCoords
+      ? 'Coordinates as imported: y points up, and scale applied. Red cells are missing, yellow ones estimated.'
+      : 'Groups belong to the specimen ID, so replicates stay together. Type in a cell, paste from a spreadsheet, or tick rows and assign them.');
+
+    if (focus) {
+      const again = [...document.querySelectorAll('input.dt-cell')].find(i => i.dataset.key === focus.key && i.dataset.col === focus.col);
+      if (again) { again.focus(); if (focus.at != null) again.setSelectionRange(focus.at, focus.at); }
+    }
+  }
+
+  /** The records sharing these rows' specimen IDs, as a group value belongs to the ID. */
+  function recordsOf(keys) {
+    const ids = new Set(S.dataset.specimens.filter(s => keys.includes(s.key)).map(s => s.id));
+    return S.dataset.specimens.filter(s => ids.has(s.id));
+  }
+  function editGroups(next) {
+    S.table = next;
+    S.dtMessage = '';
+    writeGroups();
+    setTimeout(rerun, 0); // after the browser has moved the focus, so typing carries on in the next cell
   }
 
   function renderSide() {
@@ -334,19 +457,10 @@
 
   const NEEDS_FIT = ['morpho', 'size'];
   const PLOT_IDS = { picked: 'plotPicked', super: 'plotSuper', scatter: 'plotScatter', scree: 'plotScree', shape: 'plotShape', size: 'plotSize', repeat: 'plotRepeat' };
-  const tabPlots = tab => ({ super: ['super'], morpho: ['scatter', 'scree', S.shapeMode === 'picked' ? 'picked' : 'shape'], size: ['size'], repeat: ['repeat'] }[tab]);
+  const tabPlots = tab => ({ super: ['super'], morpho: ['scatter', 'scree', S.shapeMode === 'picked' ? 'picked' : 'shape'], size: ['size'], repeat: ['repeat'], data: [] }[tab]);
 
   function renderFigures() {
     const { res } = S;
-    if (!S.fitted && NEEDS_FIT.includes(S.tab)) S.tab = 'super';
-    document.querySelectorAll('.tab').forEach(b => {
-      if (NEEDS_FIT.includes(b.dataset.tab)) {
-        b.disabled = !S.fitted;
-        b.title = S.fitted ? '' : 'Run the Procrustes fit first';
-      }
-    });
-    document.querySelectorAll('.tab').forEach(b => { b.classList.toggle('on', b.dataset.tab === S.tab); b.setAttribute('aria-selected', b.dataset.tab === S.tab); });
-    document.querySelectorAll('.panel').forEach(p => { p.hidden = p.dataset.panel !== S.tab; });
     fillPcSelect('selPcX', S.pcX);
     fillPcSelect('selPcY', S.pcY);
     fillPcSelect('selShapePc', S.shapePc);
@@ -435,9 +549,10 @@
   }
 
   function clearAll(draw) {
-    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
+    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dtFilter: '', dtSort: null, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, autoData: false, dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
     S.flip = new Set(); S.excludeSpecimens = new Set(); S.excludePoints = new Set();
     closeStylePop();
+    $('dtFilter').value = '';
     if (draw !== false) render();
   }
 
@@ -497,10 +612,97 @@
   on($('fData'), 'change', async e => { await addFiles(e.target.files); e.target.value = ''; });
   on($('fGroups'), 'change', async e => {
     const f = e.target.files[0];
-    if (f) { useTable(await f.text(), f.name); rerun(); }
+    if (f) { useTable(await f.text(), f.name); writeGroups(); rerun(); }
     e.target.value = '';
   });
   on($('bFit'), 'click', () => { S.fitted = !S.fitted; render(); });
+
+  // Data table
+  on($('dtFilter'), 'input', e => { S.dtFilter = e.target.value; renderDataTable(); });
+  on($('chkCoords'), 'change', e => { S.dtCoords = e.target.checked; renderDataTable(); });
+  on($('dtBulkCol'), 'change', () => renderDataTable());
+  on($('bLoadGroups'), 'click', () => $('fGroups').click());
+  on($('bSaveGroups'), 'click', () => save(new Blob([TB.groupsCSV(S.table)], { type: 'text/csv' }), 'groups.csv'));
+  on($('bDownloadTable'), 'click', () => {
+    const text = TB.tableCSV(S.dtRows, groupColumns(), pointColumns(), { coords: S.dtCoords });
+    save(new Blob([text], { type: 'text/csv' }), 'specimen-table.csv');
+  });
+  const addColumnNow = () => {
+    const name = $('dtNewCol').value;
+    const next = TB.addColumn(S.table || TB.emptyTable(), name);
+    if (!next) {
+      S.dtMessage = name.trim() ? `There is already a column called “${name.trim()}”.` : 'Give the new column a name first.';
+      renderDataTable();
+      return;
+    }
+    $('dtNewCol').value = '';
+    editGroups(next);
+  };
+  on($('bAddCol'), 'click', addColumnNow);
+  on($('dtNewCol'), 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addColumnNow(); } });
+  on($('bBulk'), 'click', () => {
+    const col = $('dtBulkCol').value;
+    if (!col || !S.dtSelected.size) return;
+    editGroups(TB.setCells(S.table, recordsOf([...S.dtSelected]), col, $('dtBulkValue').value));
+  });
+  on($('dataTable'), 'click', e => {
+    const mark = e.target.closest('.mk');
+    if (mark) { openStylePop(mark.closest('tr').dataset.key, mark); return; }
+    const sort = e.target.closest('[data-sort]');
+    if (sort) {
+      const col = sort.dataset.sort;
+      S.dtSort = { col, dir: S.dtSort && S.dtSort.col === col ? -S.dtSort.dir : 1 };
+      renderDataTable();
+      return;
+    }
+    const remove = e.target.closest('[data-remove]');
+    if (!remove) return;
+    const col = remove.dataset.remove;
+    if (S.dtArmed === col) { S.dtArmed = null; editGroups(TB.removeColumn(S.table, col)); return; }
+    S.dtArmed = col;
+    renderDataTable();
+    setTimeout(() => { if (S.dtArmed === col) { S.dtArmed = null; if (S.tab === 'data') renderDataTable(); } }, 4000);
+  });
+  on($('dataTable'), 'change', e => {
+    const t = e.target;
+    if (t.id === 'dtSelectAll') {
+      for (const r of S.dtRows) { if (t.checked) S.dtSelected.add(r.key); else S.dtSelected.delete(r.key); }
+      renderDataTable();
+    } else if (t.classList.contains('dt-select')) {
+      const key = t.closest('tr').dataset.key;
+      if (t.checked) S.dtSelected.add(key); else S.dtSelected.delete(key);
+      renderDataTable();
+    } else if (t.classList.contains('dt-use')) {
+      const key = t.closest('tr').dataset.key;
+      if (t.checked) S.excludeSpecimens.delete(key); else S.excludeSpecimens.add(key);
+      rerun();
+    } else if (t.classList.contains('dt-cell')) {
+      editGroups(TB.setCells(S.table, recordsOf([t.dataset.key]), t.dataset.col, t.value));
+    }
+  });
+  on($('dataTable'), 'keydown', e => {
+    if (e.key !== 'Enter' || !e.target.classList.contains('dt-cell')) return;
+    e.preventDefault();
+    const column = [...document.querySelectorAll('input.dt-cell')].filter(i => i.dataset.col === e.target.dataset.col);
+    const next = column[column.indexOf(e.target) + 1];
+    if (next) next.focus(); else e.target.blur();
+  });
+  on($('dataTable'), 'paste', e => {
+    const t = e.target;
+    if (!t.classList.contains('dt-cell') || !e.clipboardData) return;
+    const text = e.clipboardData.getData('text/plain') || e.clipboardData.getData('text');
+    if (!/[\t\n]/.test(text.replace(/\r?\n$/, ''))) return; // one value: an ordinary paste into the cell
+    e.preventDefault();
+    const matrix = TB.parsePaste(text), groups = groupColumns();
+    const startRow = S.dtRows.findIndex(r => r.key === t.dataset.key), startCol = groups.indexOf(t.dataset.col);
+    let next = S.table;
+    matrix.forEach((line, r) => line.forEach((value, c) => {
+      const row = S.dtRows[startRow + r], col = groups[startCol + c];
+      if (row && col) next = TB.setCells(next, recordsOf([row.key]), col, value);
+    }));
+    editGroups(next);
+  });
+
   on($('bEditLinks'), 'click', () => {
     S.editingLinks = !S.editingLinks;
     S.linkStart = null;

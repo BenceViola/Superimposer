@@ -216,3 +216,11 @@ test('coordinates are included on request, with NA where missing', () => {
   assert.equal(parsed.rows[0].LM01_x, 'NA');
   assert.notEqual(parsed.rows[0].LM02_x, 'NA');
 });
+
+test('coordinate columns can skip points, keeping each point’s own values', () => {
+  const pts2 = [[1, 1], [2, 2], [3, 9], [40, 50]];
+  const d = data(rec('A', {}, pts2));
+  const chosen = [{ id: 'LM04', at: 3 }];
+  const parsed = IO.parseTable(TB.tableCSV(TB.buildRows(d, null, null, new Set()), [], chosen, { coords: true }));
+  assert.equal(parsed.rows[0].LM04_x, '40');
+});

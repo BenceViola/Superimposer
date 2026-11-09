@@ -125,6 +125,7 @@
           <button role="tab" data-tab="morpho" class="tab" type="button">Morphospace</button>
           <button role="tab" data-tab="size" class="tab" type="button">Size</button>
           <button role="tab" data-tab="repeat" class="tab" type="button">Repeatability</button>
+          <button role="tab" data-tab="data" class="tab" type="button">Data table</button>
         </nav>
 
         <div class="panel" data-panel="super">
@@ -201,6 +202,31 @@
           <div class="plot" id="plotSize"></div>
         </div>
 
+        <div class="panel" data-panel="data" hidden>
+          <div class="dt-tools">
+            <input type="search" id="dtFilter" placeholder="Filter" aria-label="Filter the table">
+            <label class="check"><input type="checkbox" id="chkCoords"> Coordinates</label>
+            <span class="hint" id="dtCount"></span>
+            <div class="grp dt-right">
+              <button class="btn sm" id="bSaveGroups" type="button" title="Save the group columns as a CSV">Save groups</button>
+              <button class="btn sm" id="bLoadGroups" type="button" title="Load group columns from a CSV">Load groups</button>
+              <button class="btn sm" id="bDownloadTable" type="button" title="The table as shown, as a CSV">Download table</button>
+            </div>
+          </div>
+          <div class="dt-tools">
+            <input id="dtNewCol" placeholder="New group column" aria-label="Name of a new group column">
+            <button class="btn sm" id="bAddCol" type="button">Add column</button>
+            <span class="dt-sep"></span>
+            <label class="ctrls">Assign ticked rows: <select id="dtBulkCol" aria-label="Group column to assign"></select></label>
+            <input id="dtBulkValue" list="dtBulkList" placeholder="Value" aria-label="Value to assign">
+            <datalist id="dtBulkList"></datalist>
+            <button class="btn sm" id="bBulk" type="button">Assign</button>
+          </div>
+          <p class="hint" id="dtHint"></p>
+          <div class="dt-wrap"><table id="dataTable"></table></div>
+          <div id="dtLists"></div>
+        </div>
+
         <div class="panel" data-panel="repeat" hidden>
           <div class="plot-head">
             <p class="hint" id="repeatHint"></p>
@@ -229,6 +255,7 @@
 <script src="src/exports.js"></script>
 <script src="src/plots.js"></script>
 <script src="src/links.js"></script>
+<script src="src/table.js"></script>
 <script src="src/example.js"></script>
 <script src="src/app.js"></script>
 </body>

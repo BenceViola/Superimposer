@@ -11,6 +11,7 @@ All logic is pure and DOM-free (UMD: `window.SupX` in the browser, `require` in 
 - `src/exports.js` (`SupExport`): result tables as text.
 - `src/plots.js` (`SupPlots`): figures as self-contained SVG strings, used for both the page and the exports.
 - `src/links.js` (`SupLinks`): lines between landmarks, as pairs of row ids. They belong to the app, not the file format.
+- `src/table.js` (`SupTable`): the Data table: editing group columns, building, sorting and filtering rows. A group table is the `{ columns, rows }` from `IO.parseTable`, so CSV files and edits are one thing. Group values belong to the specimen ID.
 - `src/example.js` (`SupExample`): invented fish, as landmark-json.
 - `src/app.js`: UI only. One state object `S`, exposed as `window.__sup` for the browser tests; any change calls `rerun()` or `render()`. The calculation always runs; `S.fitted` decides whether the fitted results are shown, and goes back to false when new data arrive. Morphospace, Size and the results download wait for it.
 - Must keep working from `file://`: classic `<script src>` only, no ES module imports.
