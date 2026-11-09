@@ -149,9 +149,9 @@ test('rotated mirror images are still found', () => {
   assert.deepEqual(GM.findMirrored(m), [5]);
 });
 
-test('symmetric shapes are not flagged, because left and right can’t be told apart', () => {
+test('nearly collinear shapes are not flagged, because left and right can’t be told apart', () => {
   const q = rng(5);
-  const m = Array.from({ length: 8 }, () => [[-5, 0], [5, 0], [0, 6], [0, -6]].map(p => [p[0] + 0.01 * q(), p[1] + 0.01 * q()]));
+  const m = Array.from({ length: 12 }, () => [[-5, 0], [-2, 0], [1, 0], [6, 0]].map(p => [p[0] + 0.02 * q(), p[1] + 0.02 * q()]));
   assert.deepEqual(GM.findMirrored(m), []);
 });
 

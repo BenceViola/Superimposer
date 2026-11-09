@@ -230,6 +230,10 @@
       const set = norms.map((c, i) => rotateOnto(ref, next[i] < 0 ? mirrorOf(c) : c));
       ref = normalise(meanOf(set));
     }
+    // A shape only has a left and a right if its mirror image is clearly different, compared with the variation between specimens.
+    const chirality = distance(ref, rotateOnto(ref, mirrorOf(ref)));
+    const nearest = norms.map(c => Math.min(distance(ref, rotateOnto(ref, c)), distance(ref, rotateOnto(ref, mirrorOf(c))))).sort((a, b) => a - b);
+    if (chirality <= 3 * quantile(nearest, 0.5)) return [];
     return labels.map((v, i) => (v < 0 ? i : -1)).filter(i => i >= 0);
   }
 

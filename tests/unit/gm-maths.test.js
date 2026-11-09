@@ -112,6 +112,13 @@ test('the consensus is on the principal axes, so results do not depend on input 
   nearAll(a.consensus.map(p => p.map(Math.abs)), b.consensus.map(p => p.map(Math.abs)), 1e-6);
 });
 
+test('the consensus keeps the orientation of the data, so a fish stays the right way round', () => {
+  const long = [[-10, 0.5], [-4, 2], [3, 1.5], [10, 0], [2, -2]];
+  const g = GM.gpa(jittered(13, long, 6));
+  assert.ok(g.consensus[0][0] < 0 && g.consensus[3][0] > 0, 'snout left, tail right');
+  assert.ok(g.consensus[1][1] > g.consensus[4][1], 'back up, belly down');
+});
+
 test('PCA: scores are centred, variance adds up, loadings are orthonormal', () => {
   const g = GM.gpa(jittered(6, shape2, 12));
   const p = GM.pca(g.tangent);
