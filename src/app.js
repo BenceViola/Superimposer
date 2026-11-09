@@ -2,7 +2,7 @@
 // All calculation is in io.js, gm.js, exports.js and plots.js.
 (function () {
   'use strict';
-  const IO = window.SupIO, GM = window.SupGM, EX = window.SupExport, PL = window.SupPlots, EXAMPLE = window.SupExample;
+  const LK = window.SupLinks, IO = window.SupIO, GM = window.SupGM, EX = window.SupExport, PL = window.SupPlots, EXAMPLE = window.SupExample;
   const $ = id => document.getElementById(id);
   const on = (el, ev, fn) => el.addEventListener(ev, fn);
   const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -15,6 +15,7 @@
     missing: 'specimens', replicates: 'all', semilandmarks: false,
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
     colour: '', labels: true, hulls: false, equal: true,
+    links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
     fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0, selected: null,
     view: IDENTITY.map(r => r.slice()),
   };
@@ -31,6 +32,7 @@
   /* ---------- analysis ---------- */
   function rerun() {
     S.dataset = IO.assemble(S.all, { confirmTps: S.confirmTps });
+    syncLinks();
     const known = new Set(S.dataset.specimens.map(s => s.key));
     if (S.selected && !known.has(S.selected)) S.selected = null;
     S.res = S.dataset.specimens.length ? GM.analyse(S.dataset, optsNow()) : null;
@@ -40,6 +42,45 @@
       for (const k of ['pcX', 'shapePc', 'sizePc']) if (S[k] >= q) S[k] = 0;
       if (S.pcY >= q) S.pcY = Math.min(1, q - 1);
     }
+    render();
+  }
+
+  /* ---------- links ---------- */
+  // Remembered per landmark set in this browser, as a convenience; saving a file is the way to share them.
+  const storeKey = sig => `superimposer:links:${sig}`;
+  function readStored(sig) {
+    try { return JSON.parse(localStorage.getItem(storeKey(sig))) || []; } catch { return []; }
+  }
+  function writeStored() {
+    if (!S.linkSig) return;
+    try {
+      if (S.links.length) localStorage.setItem(storeKey(S.linkSig), JSON.stringify(S.links));
+      else localStorage.removeItem(storeKey(S.linkSig));
+    } catch { /* private window or storage switched off: links just aren't remembered */ }
+  }
+  function syncLinks() {
+    const d = S.dataset;
+    const sig = d.rows.length ? JSON.stringify([d.templateName, d.dim, d.rows.map(r => r.id)]) : null;
+    if (sig === S.linkSig) return;
+    S.linkSig = sig;
+    S.links = sig ? readStored(sig) : [];
+    S.linkStart = null;
+    S.linkReport = '';
+  }
+  function setLinks(list) {
+    S.links = list;
+    writeStored();
+    render();
+  }
+  /** Ids and consensus positions of the fixed landmarks, for the automatic links. */
+  function fixedLandmarks() {
+    const { rows } = S.res.prep, at = rows.map((r, i) => i).filter(i => rows[i].type !== 'curve');
+    return { ids: at.map(i => rows[i].id), points: at.map(i => S.res.gpa.consensus[i]) };
+  }
+  function clickLandmark(id) {
+    if (S.linkStart == null) S.linkStart = id;
+    else if (S.linkStart === id) S.linkStart = null;
+    else { S.links = LK.toggle(S.links, S.linkStart, id); S.linkStart = id; writeStored(); }
     render();
   }
 
@@ -77,6 +118,7 @@
     $('message').hidden = !(S.res && !S.res.ok);
     if (S.res && !S.res.ok) $('message').textContent = S.res.message;
     if (!S.res && has) { $('message').hidden = false; $('message').textContent = 'None of the files could be used. The notes on the left say why.'; }
+    if (!(ok && S.fitted)) { S.editingLinks = false; S.linkStart = null; }
     $('bDownload').disabled = !(ok && S.fitted);
     $('bClear').disabled = !has;
     $('bGroups').disabled = !S.all.length;
@@ -124,8 +166,22 @@
     }
     if (d.units === 'px') notes.push('Coordinates are in pixels, so centroid sizes are only comparable at equal magnification.');
     if (S.tableReport) notes.push(S.tableReport);
+    if (S.linkReport) notes.push(esc(S.linkReport));
     $('issuesCard').hidden = !notes.length;
     $('issues').innerHTML = notes.map(n => `<li>${n}</li>`).join('');
+
+    // links
+    const usable = !!(res && res.ok);
+    $('linksCard').hidden = !d.rows.length;
+    $('linksCount').textContent = S.links.length ? plural(S.links.length, 'link') : '';
+    $('bEditLinks').disabled = !(usable && S.fitted);
+    $('bEditLinks').title = usable && S.fitted ? 'Click landmarks in the superimposition' : 'Run the Procrustes fit first';
+    $('bEditLinks').textContent = S.editingLinks ? 'Done' : 'Draw links';
+    $('bEditLinks').classList.toggle('on', S.editingLinks);
+    for (const id of ['bOutline', 'bTriangulate']) { $(id).hidden = d.dim === 3; $(id).disabled = !usable; }
+    $('bSaveLinks').disabled = !S.links.length;
+    $('bClearLinks').disabled = !S.links.length;
+    $('linksList').innerHTML = S.links.map((l, i) => `<li>${esc(l[0])}–${esc(l[1])}<button type="button" data-i="${i}" aria-label="Remove link ${esc(l[0])} to ${esc(l[1])}">×</button></li>`).join('');
 
     // controls
     $('selMissing').value = S.missing;
@@ -183,6 +239,7 @@
       target: GM.shapeAt(res.pca, pc, score),
       rows: res.prep.rows,
       view: res.prep.dim === 3 ? S.view : null,
+      links: LK.indexPairs(S.links, res.prep.rows),
       targetLabel: `PC${pc + 1} ${sign}${score.toFixed(3)}${S.mag > 1 ? ` (×${S.mag})` : ''}`,
       labels: S.labels, theme: th, width: 520, height: 430,
     };
@@ -196,12 +253,14 @@
     const keys = res.prep.specimens.map(s => s.key);
     const view = res.prep.dim === 3 ? S.view : null;
     const tip = res.prep.specimens.map((s, i) => `size ${res.gpa.csize[i].toPrecision(4)} · dist ${res.gpa.procD[i].toFixed(4)}`);
+    const links = LK.indexPairs(S.links, res.prep.rows);
+    const startAt = S.linkStart == null ? -1 : res.prep.rows.findIndex(r => r.id === S.linkStart);
     const base = { keys, selected: S.selected, groups, outliers: res.outliers, tips: tip, hulls: S.hulls };
     const col = c => res.pca.scores.map(r => r[c]);
     return {
       super: (theme_, extra) => (!S.fitted
-        ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, selected: S.selected, view, theme: theme_ }, extra))
-        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, selected: S.selected, view, labels: S.labels, theme: theme_ }, extra))),
+        ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, selected: S.selected, view, links, theme: theme_ }, extra))
+        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, selected: S.selected, view, labels: S.labels, links, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
       scatter: (theme_, extra) => PL.scatter(Object.assign({}, base, { x: col(S.pcX), y: col(S.pcY), xLabel: pcName(S.pcX), yLabel: pcName(S.pcY), equal: S.equal, zeroLines: true, theme: theme_ }, extra)),
       scree: (theme_, extra) => PL.scree(Object.assign({ proportion: res.pca.proportion, theme: theme_, height: 190 }, extra)),
       shape: (theme_, extra) => PL.shapeChange(Object.assign(shapeOptions(theme_), extra)),
@@ -247,9 +306,9 @@
     $('plotSuper').classList.toggle('turn', is3D);
     $('plotShape').classList.toggle('turn', is3D);
     $('bFit').textContent = S.fitted ? 'Show raw data' : 'Run Procrustes fit';
-    $('superHint').textContent = (S.fitted
+    $('superHint').textContent = S.editingLinks ? 'Click a landmark, then the next, to draw lines. Click the same landmark again to stop. Linking a joined pair removes the line.' : (S.fitted
       ? `${plural(res.prep.specimens.length, 'specimen')} aligned; the large points are the consensus.`
-      : `${plural(res.prep.specimens.length, 'specimen')} as digitised (${unitWord(S.dataset.units)}, y up), before any alignment.`) + (is3D ? ' Drag to turn.' : '');
+      : `${plural(res.prep.specimens.length, 'specimen')} as digitised (${unitWord(S.dataset.units)}, y up), before any alignment.`) + (is3D && !S.editingLinks ? ' Drag to turn.' : '');
     const mixed = S.dataset.units === 'mixed';
     $('sizeWarn').hidden = !mixed;
     if (mixed) $('sizeWarn').textContent = 'These specimens are in different units, so their centroid sizes can’t be compared.';
@@ -308,7 +367,7 @@
   }
 
   function clearAll(draw) {
-    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, table: null, tableReport: '', dataset: null, res: null, repeat: null, selected: null, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
+    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dataset: null, res: null, repeat: null, selected: null, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
     S.flip = new Set(); S.excludeSpecimens = new Set(); S.excludePoints = new Set();
     if (draw !== false) render();
   }
@@ -333,6 +392,7 @@
     }
     const files = EX.bundle(S.res, S.dataset, optsNow(), groups);
     if (S.repeat.specimens.length) files.push({ name: 'repeatability.csv', data: EX.repeatabilityCSV(S.repeat) });
+    if (S.links.length) files.push({ name: 'links.csv', data: LK.toCSV(S.links) });
     save(new Blob([IO.zipFiles(files)], { type: 'application/zip' }), 'superimposer-results.zip');
   }
 
@@ -372,6 +432,34 @@
     e.target.value = '';
   });
   on($('bFit'), 'click', () => { S.fitted = !S.fitted; render(); });
+  on($('bEditLinks'), 'click', () => {
+    S.editingLinks = !S.editingLinks;
+    S.linkStart = null;
+    if (S.editingLinks) S.tab = 'super';
+    render();
+  });
+  on($('bOutline'), 'click', () => { const { points, ids } = fixedLandmarks(); setLinks(LK.outline(points, ids)); });
+  on($('bTriangulate'), 'click', () => { const { points, ids } = fixedLandmarks(); setLinks(LK.triangulate(points, ids)); });
+  on($('bClearLinks'), 'click', () => { S.linkStart = null; setLinks([]); });
+  on($('bSaveLinks'), 'click', () => save(new Blob([LK.toCSV(S.links)], { type: 'text/csv' }), 'links.csv'));
+  on($('bLoadLinks'), 'click', () => $('fLinks').click());
+  on($('fLinks'), 'change', async e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f || !S.dataset) return;
+    const r = LK.parse(await f.text(), S.dataset.rows.filter(x => x.type !== 'curve').map(x => x.id));
+    S.linkStart = null;
+    S.linkReport = r.unknown.length ? `${f.name}: ${plural(r.unknown.length, 'line')} not used: ${r.unknown.slice(0, 6).join('; ')}${r.unknown.length > 6 ? '; …' : ''}` : '';
+    setLinks(r.links);
+  });
+  on($('linksList'), 'click', e => {
+    const b = e.target.closest('button[data-i]');
+    if (b) setLinks(S.links.filter((_, i) => i !== Number(b.dataset.i)));
+  });
+  on($('plotSuper'), 'click', e => {
+    const hit = e.target.closest('.lm-hit');
+    if (hit) clickLandmark(S.res.prep.rows[Number(hit.dataset.lm)].id);
+  });
   on($('bConfirmTps'), 'click', () => { S.confirmTps = true; rerun(); });
   on($('bFlipAll'), 'click', () => { for (const k of S.res.mirrored) S.flip.add(k); rerun(); });
   on($('bUnflip'), 'click', () => { S.flip = new Set(); rerun(); });

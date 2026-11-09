@@ -35,6 +35,8 @@ h2,h3,p{margin:0}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.sm{padding:4px 8px;font-size:12px}
 .btn:disabled{opacity:.45;cursor:default}
+.btn.on{background:var(--accent-soft);border-color:var(--accent)}
+.grp.space{margin-top:7px}
 
 .work{display:grid;grid-template-columns:320px minmax(0,1fr);gap:10px;min-height:0}
 .work:has(.side[hidden]){grid-template-columns:minmax(0,1fr)}
@@ -68,6 +70,13 @@ details.card[open] summary{margin-bottom:6px}
 .issues{margin:0;padding:0 0 0 16px;font-size:12.5px;display:flex;flex-direction:column;gap:5px;max-height:190px;overflow-y:auto}
 .issues .mono{word-break:break-all}
 
+.count{font-weight:400;color:var(--muted);font-size:12px;margin-left:4px}
+.chips{list-style:none;margin:7px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:4px;max-height:110px;overflow-y:auto}
+.chips:empty{display:none}
+.chips li{display:flex;align-items:center;gap:2px;font:500 11px var(--f-mono);background:var(--bg);border-radius:5px;padding:1px 2px 1px 6px}
+.chips button{border:0;background:none;cursor:pointer;color:var(--muted);padding:1px 4px;font-size:13px;line-height:1}
+.chips button:hover{color:var(--bad)}
+.plot .lm-hit{cursor:crosshair}
 .tbl-wrap{max-height:280px;overflow-y:auto}
 table{border-collapse:collapse;width:100%;font-size:12px}
 th{position:sticky;top:0;background:var(--panel);text-align:left;font-weight:600;color:var(--muted);padding:3px 4px;border-bottom:1px solid var(--line)}

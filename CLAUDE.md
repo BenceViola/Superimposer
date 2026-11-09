@@ -10,6 +10,7 @@ All logic is pure and DOM-free (UMD: `window.SupX` in the browser, `require` in 
 - `src/gm.js` (`SupGM`): `prepare` (dataset to complete matrix), `gpa`, `pca`, `findMirrored`, `repeatability`, `analyse` (whole chain).
 - `src/exports.js` (`SupExport`): result tables as text.
 - `src/plots.js` (`SupPlots`): figures as self-contained SVG strings, used for both the page and the exports.
+- `src/links.js` (`SupLinks`): lines between landmarks, as pairs of row ids. They belong to the app, not the file format.
 - `src/example.js` (`SupExample`): invented fish, as landmark-json.
 - `src/app.js`: UI only. One state object `S`, exposed as `window.__sup` for the browser tests; any change calls `rerun()` or `render()`. The calculation always runs; `S.fitted` decides whether the fitted results are shown, and goes back to false when new data arrive. Morphospace, Size and the results download wait for it.
 - Must keep working from `file://`: classic `<script src>` only, no ES module imports.
