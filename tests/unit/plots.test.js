@@ -243,3 +243,65 @@ test('raw data: 3D is projected through the view', () => {
   wellFormed(a);
   assert.notEqual(a, b);
 });
+
+const pathOf = (s, cls) => [...s.matchAll(new RegExp(`class="${cls}" d="([^"]*)"`, 'g'))].map(m => m[1]);
+const segments = d => (d.match(/L[-\d.]+ [-\d.]+/g) || []).length;
+const LINKS = [[0, 1], [1, 2], [2, 3]];
+
+test('raw data: links replace the outlines, and every specimen gets them', () => {
+  const s = PL.rawData(raw({ links: LINKS }));
+  wellFormed(s);
+  assert.equal(count(s, /class="raw-outline"/g), 0);
+  const wires = pathOf(s, 'wire');
+  assert.equal(wires.length, 1);
+  assert.equal(segments(wires[0]), 6 * LINKS.length);
+});
+
+test('raw data: links take the colour of their group', () => {
+  const s = PL.rawData(raw({ links: LINKS, groups: { levels: ['N', 'S'], index: [0, 0, 0, 1, 1, 1], name: 's' } }));
+  const wires = pathOf(s, 'wire');
+  assert.equal(wires.length, 2);
+  wires.forEach(w => assert.equal(segments(w), 3 * LINKS.length));
+});
+
+test('superimposition: links are drawn once, on the consensus', () => {
+  const s = PL.superimposition(sup({ links: LINKS }));
+  wellFormed(s);
+  const wires = pathOf(s, 'wire');
+  assert.equal(wires.length, 1);
+  assert.equal(segments(wires[0]), LINKS.length);
+});
+
+test('superimposition: no links, no wire', () => {
+  assert.equal(pathOf(PL.superimposition(sup()), 'wire').length, 0);
+});
+
+test('shape change: links are drawn on both shapes', () => {
+  const target = res.gpa.consensus.map(p => p.map(v => v * 1.2));
+  const s = PL.shapeChange({ mean: res.gpa.consensus, target, rows: res.prep.rows, theme: PL.THEMES.light, links: LINKS });
+  wellFormed(s);
+  assert.equal(segments(pathOf(s, 'wire-mean')[0]), LINKS.length);
+  assert.equal(segments(pathOf(s, 'wire-target')[0]), LINKS.length);
+});
+
+test('editing: every landmark gets a large click target, naming its row', () => {
+  const s = PL.superimposition(sup({ editing: true }));
+  assert.equal(count(s, /class="lm-hit"/g), 5);
+  assert.match(s, /data-lm="4"/);
+  assert.equal(count(PL.superimposition(sup()), /class="lm-hit"/g), 0);
+});
+
+test('editing: semilandmarks can’t be linked', () => {
+  const rows = res.prep.rows.map((r, i) => (i === 4 ? { id: 'C01_01', type: 'curve', curve: 'C01', index: 1 } : r));
+  assert.equal(count(PL.superimposition(sup({ editing: true, rows })), /class="lm-hit"/g), 4);
+});
+
+test('editing: the landmark waiting for its partner is ringed', () => {
+  assert.equal(count(PL.superimposition(sup({ editing: true, linkStart: 2 })), /class="link-start"/g), 1);
+});
+
+test('exported figures carry links but nothing from editing', () => {
+  const s = PL.superimposition(sup({ editing: true, linkStart: 2, links: LINKS, forExport: true }));
+  assert.equal(pathOf(s, 'wire').length, 1);
+  assert.equal(count(s, /class="lm-hit"|class="link-start"/g), 0);
+});
