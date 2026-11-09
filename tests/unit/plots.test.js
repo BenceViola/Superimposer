@@ -200,3 +200,46 @@ test('scree: on a narrow figure only every other component is named', () => {
   assert.doesNotMatch(s, />PC2</);
   assert.match(s, />PC3</);
 });
+
+const raw = over => Object.assign({ matrix: res.prep.matrix, keys: res.prep.specimens.map(s => s.key), theme: PL.THEMES.light }, over);
+
+test('raw data: every point and one outline per specimen, and no consensus', () => {
+  const s = PL.rawData(raw());
+  wellFormed(s);
+  assert.equal(count(s, /class="raw-outline"/g), 6);
+  assert.equal(count(s, /M[-\d.]+ [-\d.]+h0/g), 6 * 5);
+  assert.equal(count(s, /class="consensus"/g), 0);
+});
+
+test('raw data: specimens are drawn at their true relative size and place', () => {
+  const small = [[0, 0], [1, 0], [0, 1]], big = small.map(p => [p[0] * 4 + 10, p[1] * 4]);
+  const s = PL.rawData({ matrix: [small, big], keys: ['a', 'b'], theme: PL.THEMES.light, forExport: true });
+  const xs = [...s.matchAll(/M([-\d.]+) [-\d.]+h0/g)].map(m => Number(m[1]));
+  const spread = v => Math.max(...v) - Math.min(...v);
+  const ratio = spread(xs.slice(3)) / spread(xs.slice(0, 3));
+  assert.ok(Math.abs(ratio - 4) < 0.05, String(ratio));
+});
+
+test('raw data: y points up', () => {
+  const s = PL.rawData({ matrix: [[[0, 0], [10, 0], [0, 10]]], keys: ['a'], theme: PL.THEMES.light });
+  const ys = [...s.matchAll(/M[-\d.]+ ([-\d.]+)h0/g)].map(m => Number(m[1]));
+  assert.ok(ys[2] < ys[0]);
+});
+
+test('raw data: groups get a legend and their own clouds', () => {
+  const s = PL.rawData(raw({ groups: { levels: ['N', 'S'], index: [0, 0, 0, 1, 1, 1], name: 's' } }));
+  assert.match(s, /class="legend"/);
+  assert.equal(count(s, /class="cloud"/g), 2);
+});
+
+test('raw data: a selected specimen is picked out', () => {
+  assert.equal(count(PL.rawData(raw({ selected: 'C' })), /class="selected"/g), 5);
+});
+
+test('raw data: 3D is projected through the view', () => {
+  const m = [[[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 5]]];
+  const a = PL.rawData({ matrix: m, keys: ['a'], theme: PL.THEMES.light, view: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] });
+  const b = PL.rawData({ matrix: m, keys: ['a'], theme: PL.THEMES.light, view: [[0, 0, 1], [0, 1, 0], [-1, 0, 0]] });
+  wellFormed(a);
+  assert.notEqual(a, b);
+});

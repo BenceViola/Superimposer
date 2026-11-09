@@ -1,6 +1,6 @@
 'use strict';
 const { test } = require('@playwright/test');
-const { openApp, loadExample, upload, tps2d, tps3d, expect } = require('./helpers.js');
+const { openApp, loadExample, loadRaw, fit, upload, tps2d, tps3d, expect } = require('./helpers.js');
 
 test('opens with an invitation to add data', async ({ page }) => {
   const errors = await openApp(page);
@@ -37,6 +37,7 @@ test('a mirrored specimen is reported and can be flipped', async ({ page }) => {
 test('TPS files open, 2D', async ({ page }) => {
   await openApp(page);
   await upload(page, 'set.tps', tps2d());
+  await fit(page);
   await expect(page.locator('#plotSuper .consensus')).toHaveCount(5);
   await expect(page.locator('#summary')).toContainText('6 specimens');
   await expect(page.locator('#summary')).toContainText('2D');
@@ -214,4 +215,85 @@ test('the figures follow the window size', async ({ page }) => {
   const before = await width();
   await page.setViewportSize({ width: 1000, height: 800 });
   await expect.poll(width).toBeLessThan(before);
+});
+
+test('data open as they are, before any alignment', async ({ page }) => {
+  const errors = await openApp(page);
+  await loadRaw(page);
+  await expect(page.locator('#plotSuper .raw-outline').first()).toBeVisible();
+  await expect(page.locator('#plotSuper .consensus')).toHaveCount(0);
+  await expect(page.locator('#bFit')).toHaveText('Run Procrustes fit');
+  await expect(page.locator('[data-tab="morpho"]')).toBeDisabled();
+  await expect(page.locator('[data-tab="size"]')).toBeDisabled();
+  await expect(page.locator('[data-tab="repeat"]')).toBeEnabled();
+  await expect(page.locator('#bDownload')).toBeDisabled();
+  expect(errors).toEqual([]);
+});
+
+test('the button runs the fit, and goes back to the raw data', async ({ page }) => {
+  await openApp(page);
+  await loadRaw(page);
+  await page.click('#bFit');
+  await expect(page.locator('#plotSuper .consensus').first()).toBeVisible();
+  await expect(page.locator('#plotSuper .raw-outline')).toHaveCount(0);
+  await expect(page.locator('[data-tab="morpho"]')).toBeEnabled();
+  await expect(page.locator('#bDownload')).toBeEnabled();
+  await expect(page.locator('#bFit')).toHaveText('Show raw data');
+  await page.click('[data-tab="morpho"]');
+  await page.click('[data-tab="super"]');
+  await page.click('#bFit');
+  await expect(page.locator('#plotSuper .raw-outline').first()).toBeVisible();
+  await expect(page.locator('#plotSuper .consensus')).toHaveCount(0);
+});
+
+test('distances wait for the fit', async ({ page }) => {
+  await openApp(page);
+  await loadRaw(page);
+  await expect(page.locator('#tblSpecimens td.num').first()).toHaveText('');
+  await fit(page);
+  await expect(page.locator('#tblSpecimens td.num').first()).not.toHaveText('');
+});
+
+test('changing a setting keeps the fit', async ({ page }) => {
+  await openApp(page);
+  await loadExample(page);
+  await page.check('#chkSemi');
+  await expect(page.locator('#plotSuper .consensus').first()).toBeVisible();
+});
+
+test('new data start unaligned again', async ({ page }) => {
+  await openApp(page);
+  await loadExample(page);
+  const p = await page.evaluate(() => window.__sup.S.dataset.rows.length);
+  await upload(page, 'extra.tps', tps2d(2, p));
+  await expect(page.locator('#plotSuper .raw-outline').first()).toBeVisible();
+  await expect(page.locator('#bFit')).toHaveText('Run Procrustes fit');
+});
+
+test('the raw view downloads under its own name', async ({ page }) => {
+  await openApp(page);
+  await loadRaw(page);
+  const [svg] = await Promise.all([page.waitForEvent('download'), page.click('[data-export="svg"][data-plot="super"]')]);
+  expect(svg.suggestedFilename()).toBe('raw-data.svg');
+});
+
+test('repeatability needs no fit', async ({ page }) => {
+  await openApp(page);
+  await loadRaw(page);
+  await page.click('[data-tab="repeat"]');
+  await expect(page.locator('#plotRepeat .bar').first()).toBeVisible();
+});
+
+test('3D raw data turn by dragging', async ({ page }) => {
+  await openApp(page);
+  await upload(page, 'set3.tps', tps3d());
+  const svg = page.locator('#plotSuper svg');
+  await expect(page.locator('#plotSuper .raw-outline').first()).toBeVisible();
+  const before = await svg.innerHTML();
+  const box = await svg.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2 + 20, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => page.locator('#plotSuper svg').innerHTML()).not.toBe(before);
 });

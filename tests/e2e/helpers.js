@@ -11,9 +11,18 @@ async function openApp(page) {
   await expect(page.locator('html')).toHaveAttribute('data-ready', '1');
   return errors;
 }
-async function loadExample(page) {
+/** The example data as they open: not yet aligned. */
+async function loadRaw(page) {
   await page.click('#bExample');
   await expect(page.locator('#plotSuper svg')).toBeVisible();
+}
+async function fit(page) {
+  await page.click('#bFit');
+  await expect(page.locator('#plotSuper .consensus').first()).toBeVisible();
+}
+async function loadExample(page) {
+  await loadRaw(page);
+  await fit(page);
 }
 const upload = (page, name, text, input = '#fData') => page.setInputFiles(input, { name, mimeType: 'text/plain', buffer: Buffer.from(text) });
 
@@ -35,4 +44,4 @@ function tps3d(n = 6, p = 5) {
   }
   return L.join('\n') + '\n';
 }
-module.exports = { openApp, loadExample, upload, tps2d, tps3d, expect };
+module.exports = { openApp, loadExample, loadRaw, fit, upload, tps2d, tps3d, expect };

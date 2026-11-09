@@ -88,6 +88,23 @@ test('flipping mirrors x and marks the specimen', () => {
   assert.equal(p.specimens[1].flipped, false);
 });
 
+test('rawCoords leaves ordinary specimens as they are', () => {
+  const p = GM.prepare(data(rec('A', noisy()), rec('B', noisy())));
+  assert.deepEqual(GM.rawCoords(p), p.matrix);
+});
+
+test('rawCoords keeps a flipped specimen where it was on the picture', () => {
+  const pts = noisy();
+  const plain = GM.prepare(data(rec('A', pts), rec('B', noisy())));
+  const p = GM.prepare(data(rec('A', pts), rec('B', noisy())), { flip: new Set(['A']) });
+  const out = GM.rawCoords(p)[0];
+  const meanX = c => c.reduce((s, q) => s + q[0], 0) / c.length;
+  near(meanX(out), meanX(plain.matrix[0]), 1e-9);
+  out.forEach((q, i) => near(q[1], plain.matrix[0][i][1], 1e-12));
+  const order = c => c.map(q => q[0]).map((v, i, a) => v - a[0]);
+  nearAll(order(out), order(plain.matrix[0]).map(v => -v), 1e-9);
+});
+
 const rep = (id, n, pts, op) => rec(id, pts, { specimen: { replicate: n }, provenance: op ? { operator: op } : undefined });
 
 test('replicates can be averaged per specimen and operator', () => {
