@@ -411,10 +411,15 @@
     return { columns, rows: records.map(r => Object.fromEntries(columns.map((c, i) => [c, r[i] || '']))) };
   }
 
+  /** The column that holds specimen names: a known heading, or else the first column. */
+  function idColumnOf(table) {
+    const known = ['specimen_id', 'specimen', 'id', 'key', 'tps_id'];
+    return table.columns.find(c => known.includes(c.toLowerCase())) || table.columns[0];
+  }
+
   /** Attach table columns to specimens, by exact key first, then by specimen id. */
   function joinGroups(specimens, table) {
-    const known = ['specimen_id', 'specimen', 'id', 'key', 'tps_id'];
-    const idColumn = table.columns.find(c => known.includes(c.toLowerCase())) || table.columns[0];
+    const idColumn = idColumnOf(table);
     const names = table.columns.filter(c => c !== idColumn);
     const byId = new Map(table.rows.map(r => [r[idColumn], r]));
     const usedRows = new Set(), unmatched = [];
@@ -429,5 +434,5 @@
     return { values, factors, unmatched, unused, idColumn };
   }
 
-  return { parseTPS, parseLmk, stem, assemble, loadFiles, zipFiles, unzipFiles, parseTable, joinGroups, safeName };
+  return { parseTPS, parseLmk, stem, assemble, loadFiles, zipFiles, unzipFiles, parseTable, idColumnOf, joinGroups, safeName };
 }));
