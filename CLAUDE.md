@@ -35,4 +35,4 @@ Write the failing test first, see it fail, then implement. Commit red and green 
 
 ## Next
 
-Semilandmark sliding, thin-plate spline deformation grids.
+Editing group membership (to be discussed). Semilandmark sliding is on hold.

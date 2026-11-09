@@ -147,7 +147,7 @@
                 <div class="exports"><button class="btn sm" data-export="svg" data-plot="scatter" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="scatter" type="button">PNG</button></div>
               </div>
               <div class="plot" id="plotScatter"></div>
-              <p class="hint" id="selectionNote">Click a specimen to pick it out.</p>
+              <p class="hint" id="selectionNote">Click a specimen to see its landmarks (up to 4), or empty space for the shape at that position.</p>
               <div class="plot-head">
                 <h3>Share of shape variance</h3>
                 <div class="exports"><button class="btn sm" data-export="svg" data-plot="scree" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="scree" type="button">PNG</button></div>
@@ -156,16 +156,38 @@
             </div>
             <div class="col">
               <div class="plot-head">
-                <div class="ctrls"><label>Shape along <select id="selShapePc"></select></label></div>
-                <div class="exports"><button class="btn sm" data-export="svg" data-plot="shape" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="shape" type="button">PNG</button></div>
+                <div class="seg" role="group" aria-label="Which shapes to show">
+                  <button class="segb" data-shape="axis" type="button">Along an axis</button>
+                  <button class="segb" data-shape="picked" type="button">Selected <span id="pickCount"></span></button>
+                </div>
+                <label class="ctrls" id="shapeStyleRow">Show as
+                  <select id="selShapeStyle"><option value="arrows">Arrows</option><option value="grid">Deformation grid</option></select>
+                </label>
               </div>
-              <div class="plot" id="plotShape"></div>
-              <label class="field slider">Position on the axis, from its lowest to its highest specimen
-                <input type="range" id="rngShape" min="-1" max="1" step="0.01" value="1">
-              </label>
-              <label class="field slider">Exaggerate the change <span class="mono" id="magValue">×1</span>
-                <input type="range" id="rngMag" min="1" max="5" step="0.5" value="1">
-              </label>
+              <div id="shapeAxis">
+                <div class="plot-head">
+                  <div class="ctrls"><label>Shape along <select id="selShapePc"></select></label></div>
+                  <div class="exports"><button class="btn sm" data-export="svg" data-plot="shape" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="shape" type="button">PNG</button></div>
+                </div>
+                <div class="plot" id="plotShape"></div>
+                <label class="field slider">Position on the axis, from its lowest to its highest specimen
+                  <input type="range" id="rngShape" min="-1" max="1" step="0.01" value="1">
+                </label>
+                <label class="field slider">Exaggerate the change <span class="mono" id="magValue">×1</span>
+                  <input type="range" id="rngMag" min="1" max="5" step="0.5" value="1">
+                </label>
+              </div>
+              <div id="shapePicked" hidden>
+                <div class="plot-head">
+                  <ul id="pickChips" class="chips flat"></ul>
+                  <div class="exports">
+                    <button class="btn sm" id="bClearPicks" type="button">Clear</button>
+                    <button class="btn sm" data-export="svg" data-plot="picked" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="picked" type="button">PNG</button>
+                  </div>
+                </div>
+                <p class="hint" id="pickHint"></p>
+                <div class="plot" id="plotPicked"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -189,6 +211,16 @@
       </div>
     </section>
   </main>
+  <div id="stylePop" class="pop" role="dialog" aria-labelledby="popKey" hidden>
+    <h3 id="popKey"></h3>
+    <div class="pop-row" id="popColours" role="group" aria-label="Colour"></div>
+    <label class="pop-custom">Other colour <input type="color" id="popCustom"></label>
+    <div class="pop-row" id="popMarkers" role="group" aria-label="Marker"></div>
+    <div class="grp space">
+      <button class="btn sm" id="bStyleReset" type="button">Use group style</button>
+      <button class="btn sm" id="bStyleResetAll" type="button">Reset all</button>
+    </div>
+  </div>
   <div id="tip" class="tip" hidden></div>
   <div id="dropCue" class="drop-cue" hidden>Drop to add these files</div>
 </div>

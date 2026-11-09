@@ -7,6 +7,7 @@
   const on = (el, ev, fn) => el.addEventListener(ev, fn);
   const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const MAX_PICKS = 4;
   const IDENTITY = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
 
   const S = {
@@ -16,7 +17,8 @@
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
     colour: '', labels: true, hulls: false, equal: true,
     links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
-    fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0, selected: null,
+    fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0,
+    picked: [], analysisSig: '', shapeMode: 'axis', shapeStyle: 'arrows', styles: {}, styleKey: null,
     view: IDENTITY.map(r => r.slice()),
   };
   window.__sup = { S };
@@ -34,9 +36,13 @@
     S.dataset = IO.assemble(S.all, { confirmTps: S.confirmTps });
     syncLinks();
     const known = new Set(S.dataset.specimens.map(s => s.key));
-    if (S.selected && !known.has(S.selected)) S.selected = null;
+    S.picked = S.picked.filter(p => p.virtual || known.has(p.key));
     S.res = S.dataset.specimens.length ? GM.analyse(S.dataset, optsNow()) : null;
     S.repeat = GM.repeatability(S.dataset);
+    // A theoretical shape only means something in the PCA it came from.
+    const fitted = S.res && S.res.ok ? S.res.prep : null;
+    const sig = fitted ? JSON.stringify([fitted.specimens.map(s => [s.key, s.flipped]), fitted.rows.map(r => r.id)]) : '';
+    if (sig !== S.analysisSig) { S.analysisSig = sig; S.picked = S.picked.filter(p => !p.virtual); }
     if (S.res && S.res.ok) {
       const q = S.res.pca.values.length;
       for (const k of ['pcX', 'shapePc', 'sizePc']) if (S[k] >= q) S[k] = 0;
@@ -48,8 +54,16 @@
   /* ---------- links ---------- */
   // Remembered per landmark set in this browser, as a convenience; saving a file is the way to share them.
   const storeKey = sig => `superimposer:links:${sig}`;
-  function readStored(sig) {
-    try { return JSON.parse(localStorage.getItem(storeKey(sig))) || []; } catch { return []; }
+  const styleKey = sig => `superimposer:styles:${sig}`;
+  function readJson(key, fallback) {
+    try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
+  }
+  function writeStyles() {
+    if (!S.linkSig) return;
+    try {
+      if (Object.keys(S.styles).length) localStorage.setItem(styleKey(S.linkSig), JSON.stringify(S.styles));
+      else localStorage.removeItem(styleKey(S.linkSig));
+    } catch { /* see writeStored */ }
   }
   function writeStored() {
     if (!S.linkSig) return;
@@ -63,7 +77,8 @@
     const sig = d.rows.length ? JSON.stringify([d.templateName, d.dim, d.rows.map(r => r.id)]) : null;
     if (sig === S.linkSig) return;
     S.linkSig = sig;
-    S.links = sig ? readStored(sig) : [];
+    S.links = sig ? readJson(storeKey(sig), []) : [];
+    S.styles = sig ? readJson(styleKey(sig), {}) : {};
     S.linkStart = null;
     S.linkReport = '';
   }
@@ -94,18 +109,19 @@
     add('operator', 'Operator', s => s.operator);
     add('replicate', 'Replicate', s => (s.nReplicates > 1 ? '' : String(s.replicate)));
     if (S.table) {
-      const joined = IO.joinGroups(list, S.table);
+      const everyone = [...new Map([...S.dataset.specimens, ...list].map(s => [s.key, s])).values()];
+      const joined = IO.joinGroups(everyone, S.table);
       for (const f of joined.factors) {
-        const byKey = new Map(list.map((s, i) => [s.key, joined.values[i][f.name]]));
+        const byKey = new Map(everyone.map((s, i) => [s.key, joined.values[i][f.name]]));
         add(`csv:${f.name}`, f.name, s => byKey.get(s.key));
       }
     }
     return out;
   }
-  function currentGroups(options) {
+  function currentGroups(options, list) {
     const opt = options.find(o => o.value === S.colour);
     if (!opt || opt.levels.length === 0 || opt.levels.length > PL.MAX_LEVELS) return undefined;
-    return { name: opt.label, levels: opt.levels, index: S.res.prep.specimens.map(s => opt.levels.indexOf(opt.get(s) || '')) };
+    return { name: opt.label, levels: opt.levels, index: (list || S.res.prep.specimens).map(s => opt.levels.indexOf(opt.get(s) || '')) };
   }
 
   /* ---------- drawing ---------- */
@@ -200,13 +216,16 @@
     const inPrep = new Map(prep ? prep.specimens.map((s, i) => [s.key, i]) : []);
     const droppedBy = new Map(prep ? prep.dropped.specimens.map(x => [x.key, x.reason]) : []);
     const ok = res && res.ok && S.fitted;
-    $('tblSpecimens').innerHTML = '<thead><tr><th></th><th>Specimen</th><th class="num" title="Procrustes distance to the consensus">Dist.</th></tr></thead><tbody>' + d.specimens.map(s => {
+    const tableStyles = PL.resolveStyles(d.specimens.map(s => s.key), currentGroups(options, d.specimens), S.styles);
+    const pickedSet = new Set(S.picked.map(p => p.key));
+    $('tblSpecimens').innerHTML = '<thead><tr><th></th><th></th><th>Specimen</th><th class="num" title="Procrustes distance to the consensus">Dist.</th></tr></thead><tbody>' + d.specimens.map((s, row) => {
       const off = S.excludeSpecimens.has(s.key);
       const i = inPrep.get(s.key);
       const why = off ? '' : droppedBy.get(s.key) || (i == null && S.replicates === 'average' ? 'averaged' : '');
       const dist = ok && i != null ? res.gpa.procD[i].toFixed(4) : '';
       const flag = ok && i != null && res.outliers[i];
-      return `<tr class="${off ? 'off' : ''} ${S.selected === s.key ? 'sel' : ''}" data-key="${esc(s.key)}"><td><input type="checkbox" ${off ? '' : 'checked'} aria-label="Use ${esc(s.key)}"></td>`
+      return `<tr class="${off ? 'off' : ''} ${pickedSet.has(s.key) ? 'sel' : ''}" data-key="${esc(s.key)}"><td><input type="checkbox" ${off ? '' : 'checked'} aria-label="Use ${esc(s.key)}"></td>`
+        + `<td><button class="mk" type="button" aria-label="Change the marker of ${esc(s.key)}" title="Change marker">${PL.markerIcon(tableStyles[row], theme())}</button></td>`
         + `<td class="id">${esc(s.key)}${why ? `<div class="why">${esc(why)}</div>` : ''}</td>`
         + `<td class="num ${flag ? 'flag' : ''}" ${flag ? 'title="Far from the others: check its landmarks"' : ''}>${dist}${flag ? ' !' : ''}</td></tr>`;
     }).join('') + '</tbody>';
@@ -228,6 +247,38 @@
     $(id).value = String(value);
   }
 
+  const useGrid = () => S.shapeStyle === 'grid' && S.res.prep.dim === 2;
+
+  /** What the Selected panel shows: real specimens and theoretical shapes, ready to draw. */
+  function pickedItems(paints) {
+    const { res } = S, keys = res.prep.specimens.map(s => s.key);
+    const out = [];
+    S.picked.forEach((p, index) => {
+      let target, colour;
+      if (p.virtual) target = GM.shapeFromScores(res.pca, p.scores);
+      else {
+        const i = keys.indexOf(p.key);
+        if (i < 0) return;
+        target = res.gpa.tangent[i];
+        colour = paints[i];
+      }
+      out.push({ target, colour, label: p.label, index, warp: useGrid() ? GM.tpsWarp(res.gpa.consensus, target) || undefined : undefined });
+    });
+    return out;
+  }
+
+  function togglePick(key) {
+    const at = S.picked.findIndex(p => p.key === key);
+    if (at >= 0) S.picked.splice(at, 1);
+    else addPick({ key, label: key });
+    render();
+  }
+  function addPick(entry) {
+    S.picked.push(entry);
+    if (S.picked.length > MAX_PICKS) S.picked.shift();
+    S.shapeMode = 'picked';
+  }
+
   function shapeOptions(th) {
     const { res } = S, pc = S.shapePc;
     const col = res.pca.scores.map(r => r[pc]);
@@ -240,6 +291,7 @@
       rows: res.prep.rows,
       view: res.prep.dim === 3 ? S.view : null,
       links: LK.indexPairs(S.links, res.prep.rows),
+      warp: useGrid() ? GM.tpsWarp(res.gpa.consensus, GM.shapeAt(res.pca, pc, score)) || undefined : undefined,
       targetLabel: `PC${pc + 1} ${sign}${score.toFixed(3)}${S.mag > 1 ? ` (×${S.mag})` : ''}`,
       labels: S.labels, theme: th, width: 520, height: 430,
     };
@@ -255,13 +307,16 @@
     const tip = res.prep.specimens.map((s, i) => `size ${res.gpa.csize[i].toPrecision(4)} · dist ${res.gpa.procD[i].toFixed(4)}`);
     const links = LK.indexPairs(S.links, res.prep.rows);
     const startAt = S.linkStart == null ? -1 : res.prep.rows.findIndex(r => r.id === S.linkStart);
-    const base = { keys, selected: S.selected, groups, outliers: res.outliers, tips: tip, hulls: S.hulls };
+    const styles = PL.resolveStyles(keys, groups, S.styles);
+    const selected = S.picked.filter(p => !p.virtual).map(p => p.key);
+    const base = { keys, selected, styles, groups, outliers: res.outliers, tips: tip, hulls: S.hulls };
     const col = c => res.pca.scores.map(r => r[c]);
     return {
       super: (theme_, extra) => (!S.fitted
-        ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, selected: S.selected, view, links, theme: theme_ }, extra))
-        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, selected: S.selected, view, labels: S.labels, links, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
-      scatter: (theme_, extra) => PL.scatter(Object.assign({}, base, { x: col(S.pcX), y: col(S.pcY), xLabel: pcName(S.pcX), yLabel: pcName(S.pcY), equal: S.equal, zeroLines: true, theme: theme_ }, extra)),
+        ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, styles, selected, view, links, theme: theme_ }, extra))
+        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, styles, selected, view, labels: S.labels, links, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
+      scatter: (theme_, extra) => PL.scatter(Object.assign({}, base, { x: col(S.pcX), y: col(S.pcY), xLabel: pcName(S.pcX), yLabel: pcName(S.pcY), equal: S.equal, zeroLines: true, virtual: S.picked.filter(p => p.virtual).map(p => ({ x: p.scores[S.pcX], y: p.scores[S.pcY], label: 'Theoretical' })), theme: theme_ }, extra)),
+      picked: (theme_, extra) => PL.shapeGrid({ items: pickedItems(styles.map(st => PL.colourValue(st.colour, theme_))), mean: res.gpa.consensus, rows: res.prep.rows, links, view, labels: S.labels, theme: theme_, width: extra && extra.width }),
       scree: (theme_, extra) => PL.scree(Object.assign({ proportion: res.pca.proportion, theme: theme_, height: 190 }, extra)),
       shape: (theme_, extra) => PL.shapeChange(Object.assign(shapeOptions(theme_), extra)),
       size: (theme_, extra) => PL.scatter(Object.assign({}, base, { x: res.gpa.csize, y: col(S.sizePc), xLabel: `Centroid size (${unitWord(S.dataset.units)})`, yLabel: pcName(S.sizePc), theme: theme_ }, extra)),
@@ -273,13 +328,13 @@
   function liveSize(name, el) {
     const width = Math.max(300, Math.round(el.clientWidth));
     const room = Math.max(320, window.innerHeight - 190);
-    const shares = { super: Math.min(room, width * 0.72), scatter: Math.min(room, width * 0.74), scree: 190, shape: Math.min(room, width * 0.82), size: Math.min(room, width * 0.62), repeat: 0 };
+    const shares = { picked: 0, super: Math.min(room, width * 0.72), scatter: Math.min(room, width * 0.74), scree: 190, shape: Math.min(room, width * 0.82), size: Math.min(room, width * 0.62), repeat: 0 };
     return { width, height: Math.round(shares[name]) };
   }
 
   const NEEDS_FIT = ['morpho', 'size'];
-  const PLOT_IDS = { super: 'plotSuper', scatter: 'plotScatter', scree: 'plotScree', shape: 'plotShape', size: 'plotSize', repeat: 'plotRepeat' };
-  const TAB_PLOTS = { super: ['super'], morpho: ['scatter', 'scree', 'shape'], size: ['size'], repeat: ['repeat'] };
+  const PLOT_IDS = { picked: 'plotPicked', super: 'plotSuper', scatter: 'plotScatter', scree: 'plotScree', shape: 'plotShape', size: 'plotSize', repeat: 'plotRepeat' };
+  const tabPlots = tab => ({ super: ['super'], morpho: ['scatter', 'scree', S.shapeMode === 'picked' ? 'picked' : 'shape'], size: ['size'], repeat: ['repeat'] }[tab]);
 
   function renderFigures() {
     const { res } = S;
@@ -317,15 +372,28 @@
       ? `Raw distance between replicates of ${plural(repeated.length, 'specimen')}, within each operator. Landmarks over twice the median are marked.`
       : 'No replicates found. Landmark the same specimen again in the landmarking app to see how repeatable each landmark is.';
     const note = $('selectionNote');
-    if (S.selected) {
-      const i = res.prep.specimens.findIndex(s => s.key === S.selected);
+    const latest = S.picked[S.picked.length - 1];
+    if (latest && !latest.virtual) {
+      const i = res.prep.specimens.findIndex(s => s.key === latest.key);
       note.textContent = i >= 0
-        ? `${S.selected}: centroid size ${res.gpa.csize[i].toPrecision(4)}, distance to consensus ${res.gpa.procD[i].toFixed(4)}, PC1 ${res.pca.scores[i][0].toFixed(4)}`
-        : `${S.selected} is not in this analysis.`;
-    } else note.textContent = 'Click a specimen to pick it out.';
+        ? `${latest.key}: centroid size ${res.gpa.csize[i].toPrecision(4)}, distance to consensus ${res.gpa.procD[i].toFixed(4)}, PC1 ${res.pca.scores[i][0].toFixed(4)}`
+        : `${latest.key} is not in this analysis.`;
+    } else if (latest) note.textContent = latest.label;
+    else note.textContent = `Click a specimen to see its landmarks (up to ${MAX_PICKS}), or empty space for the shape at that position.`;
+    document.querySelectorAll('.segb').forEach(b => b.classList.toggle('on', b.dataset.shape === S.shapeMode));
+    $('pickCount').textContent = S.picked.length ? `(${S.picked.length})` : '';
+    $('shapeAxis').hidden = S.shapeMode !== 'axis';
+    $('shapePicked').hidden = S.shapeMode !== 'picked';
+    $('shapeStyleRow').hidden = is3D;
+    $('selShapeStyle').value = S.shapeStyle;
+    $('bClearPicks').hidden = !S.picked.length;
+    $('pickChips').innerHTML = S.picked.map((p, i) => `<li>${esc(p.label)}<button type="button" data-i="${i}" aria-label="Remove ${esc(p.label)}">×</button></li>`).join('');
+    $('pickHint').textContent = S.picked.length ? (S.picked.length === MAX_PICKS ? 'A fifth click replaces the oldest.' : '') : `Click specimens in the morphospace (up to ${MAX_PICKS}), or empty space for the theoretical shape there.`;
+    $('plotPicked').classList.toggle('turn', is3D);
+    if (!S.picked.length) $('plotPicked').innerHTML = '';
 
     const build = figureBuilders(), th = theme();
-    for (const name of TAB_PLOTS[S.tab]) {
+    for (const name of tabPlots(S.tab)) {
       const el = $(PLOT_IDS[name]);
       el.innerHTML = build[name](th, liveSize(name, el));
       el.querySelectorAll('.pt').forEach(g => {
@@ -367,8 +435,9 @@
   }
 
   function clearAll(draw) {
-    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dataset: null, res: null, repeat: null, selected: null, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
+    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
     S.flip = new Set(); S.excludeSpecimens = new Set(); S.excludePoints = new Set();
+    closeStylePop();
     if (draw !== false) render();
   }
 
@@ -396,7 +465,7 @@
     save(new Blob([IO.zipFiles(files)], { type: 'application/zip' }), 'superimposer-results.zip');
   }
 
-  const FIG_NAMES = { super: 'superimposition', scatter: 'morphospace', scree: 'scree', shape: 'shape-change', size: 'size', repeat: 'repeatability' };
+  const FIG_NAMES = { picked: 'selected-specimens', super: 'superimposition', scatter: 'morphospace', scree: 'scree', shape: 'shape-change', size: 'size', repeat: 'repeatability' };
 
   function exportFigure(name, kind) {
     const svg = figureBuilders()[name](PL.THEMES.light, { forExport: true });
@@ -473,7 +542,14 @@
   bindChange('selPcX', t => { S.pcX = Number(t.value); });
   bindChange('selPcY', t => { S.pcY = Number(t.value); });
   bindChange('selShapePc', t => { S.shapePc = Number(t.value); });
+  bindChange('selShapeStyle', t => { S.shapeStyle = t.value; });
   bindChange('selSizePc', t => { S.sizePc = Number(t.value); });
+  document.querySelectorAll('.segb').forEach(b => on(b, 'click', () => { S.shapeMode = b.dataset.shape; render(); }));
+  on($('bClearPicks'), 'click', () => { S.picked = []; render(); });
+  on($('pickChips'), 'click', e => {
+    const b = e.target.closest('button[data-i]');
+    if (b) { S.picked.splice(Number(b.dataset.i), 1); render(); }
+  });
   on($('rngShape'), 'input', e => { S.shapeT = Number(e.target.value); render(); });
   on($('rngMag'), 'input', e => { S.mag = Number(e.target.value); render(); });
 
@@ -486,14 +562,81 @@
     rerun();
   });
   on($('tblSpecimens'), 'click', e => {
-    if (e.target.tagName === 'INPUT') return;
     const tr = e.target.closest('tr[data-key]');
-    if (tr) { S.selected = S.selected === tr.dataset.key ? null : tr.dataset.key; render(); }
+    if (!tr) return;
+    const mark = e.target.closest('.mk');
+    if (mark) { openStylePop(tr.dataset.key, mark); return; }
+    if (e.target.closest('td.id') && S.res && S.res.ok) togglePick(tr.dataset.key);
   });
   on($('tblPoints'), 'change', e => {
     const tr = e.target.closest('tr');
     if (e.target.checked) S.excludePoints.delete(tr.dataset.id); else S.excludePoints.add(tr.dataset.id);
     rerun();
+  });
+
+  /** A click on empty space in the morphospace: the theoretical shape at that position. */
+  function pickEmptySpace(el, e) {
+    const svg = el.querySelector('svg');
+    const group = svg && svg.querySelector('[data-map]');
+    if (!group) return;
+    const box = svg.getBoundingClientRect(), k = svg.viewBox.baseVal.width / box.width;
+    const at = PL.pixelToData(group.getAttribute('data-map'), (e.clientX - box.left) * k, (e.clientY - box.top) * k);
+    if (!at) return;
+    const scores = new Array(S.res.pca.values.length).fill(0);
+    scores[S.pcX] = at[0];
+    if (S.pcY !== S.pcX) scores[S.pcY] = at[1];
+    const signed = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(3)}`;
+    addPick({ virtual: true, scores, label: `Theoretical: PC${S.pcX + 1} ${signed(at[0])}, PC${S.pcY + 1} ${signed(at[1])}` });
+    render();
+  }
+
+  /* ---------- specimen marker popup ---------- */
+  function drawStylePop() {
+    const key = S.styleKey, over = S.styles[key] || {}, th = theme();
+    const options = colourOptions();
+    const specimen = S.dataset.specimens.find(s => s.key === key);
+    const now = PL.resolveStyles([key], specimen ? currentGroups(options, [specimen]) : undefined, S.styles)[0];
+    $('popKey').textContent = key;
+    $('popColours').innerHTML = th.series.map((c, i) => `<button type="button" data-c="${i}" class="${now.colour === i ? 'on' : ''}" aria-label="Colour ${i + 1}"><i style="background:${c}"></i></button>`).join('');
+    $('popMarkers').innerHTML = PL.MARKER_NAMES.map((name, i) => `<button type="button" data-m="${i}" class="${now.marker === i ? 'on' : ''}" aria-label="${name}" title="${name}">${PL.markerIcon({ colour: now.colour, marker: i }, th, 15)}</button>`).join('');
+    $('popCustom').value = /^#/.test(PL.colourValue(now.colour, th)) ? PL.colourValue(now.colour, th) : '#808080';
+    $('bStyleReset').disabled = !S.styles[key] || !Object.keys(over).length;
+    $('bStyleResetAll').disabled = !Object.keys(S.styles).length;
+  }
+  function openStylePop(key, anchor) {
+    S.styleKey = key;
+    drawStylePop();
+    const pop = $('stylePop');
+    pop.hidden = false;
+    const a = anchor.getBoundingClientRect(), p = pop.getBoundingClientRect();
+    pop.style.left = `${Math.max(8, Math.min(a.right + 6, window.innerWidth - p.width - 8))}px`;
+    pop.style.top = `${Math.max(8, Math.min(a.top - 6, window.innerHeight - p.height - 8))}px`;
+    const first = $('popMarkers').querySelector('button.on') || $('popMarkers').querySelector('button');
+    if (first) first.focus();
+  }
+  function closeStylePop() {
+    S.styleKey = null;
+    $('stylePop').hidden = true;
+  }
+  function restyle(next) {
+    S.styles = next;
+    writeStyles();
+    render();
+    if (S.styleKey) drawStylePop();
+  }
+  const setStyle = patch => restyle(Object.assign({}, S.styles, { [S.styleKey]: Object.assign({}, S.styles[S.styleKey], patch) }));
+  on($('popColours'), 'click', e => { const b = e.target.closest('[data-c]'); if (b) setStyle({ colour: Number(b.dataset.c) }); });
+  on($('popMarkers'), 'click', e => { const b = e.target.closest('[data-m]'); if (b) setStyle({ marker: Number(b.dataset.m) }); });
+  on($('popCustom'), 'input', e => setStyle({ colour: e.target.value }));
+  on($('bStyleReset'), 'click', () => { const next = Object.assign({}, S.styles); delete next[S.styleKey]; restyle(next); });
+  on($('bStyleResetAll'), 'click', () => restyle({}));
+  on(window, 'pointerdown', e => { if (S.styleKey && !e.target.closest('#stylePop') && !e.target.closest('.mk')) closeStylePop(); });
+  on(window, 'keydown', e => {
+    if (e.key !== 'Escape' || !S.styleKey) return;
+    const key = S.styleKey;
+    closeStylePop();
+    const row = [...document.querySelectorAll('#tblSpecimens tr[data-key]')].find(tr => tr.dataset.key === key);
+    if (row) row.querySelector('.mk').focus();
   });
 
   // Hover and click on specimens, by delegation because the figures are redrawn often.
@@ -502,10 +645,8 @@
     const el = $(id);
     on(el, 'click', e => {
       const g = e.target.closest('.pt');
-      if (!g) return;
-      const key = S.res.prep.specimens[Number(g.dataset.i)].key;
-      S.selected = S.selected === key ? null : key;
-      render();
+      if (g) { togglePick(S.res.prep.specimens[Number(g.dataset.i)].key); return; }
+      if (id === 'plotScatter') pickEmptySpace(el, e);
     });
     on(el, 'pointermove', e => {
       const g = e.target.closest('.pt');
@@ -519,7 +660,7 @@
   }
 
   // Dragging turns 3D figures.
-  for (const id of ['plotSuper', 'plotShape']) {
+  for (const id of ['plotSuper', 'plotShape', 'plotPicked']) {
     const el = $(id);
     let last = null, queued = false;
     on(el, 'pointerdown', e => {
