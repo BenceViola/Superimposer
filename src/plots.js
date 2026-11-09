@@ -240,6 +240,18 @@
     return out;
   }
 
+  const linkPath = (sets, links, place) => {
+    let d = '';
+    for (const c of sets) {
+      for (const [i, j] of links) {
+        const [x0, y0] = place(c[i]), [x1, y1] = place(c[j]);
+        d += `M${f(x0)} ${f(y0)}L${f(x1)} ${f(y1)}`;
+      }
+    }
+    return d;
+  };
+  const hasLinks = o => !!(o.links && o.links.length);
+
   /** The specimens as digitised: true position, size and orientation, each with a faint outline so it reads as one object. */
   function rawData(o) {
     const W = o.width || 640, H = o.height || 520, t = o.theme;
@@ -247,7 +259,13 @@
     const sets = o.matrix.map(c => project(c, o.view));
     const place = fitter(sets.flat(), W, H, { l: 26, r: 26, t: 12 + lg.height, b: 16 });
     let b = lg.svg;
-    sets.forEach((c, i) => {
+    if (hasLinks(o)) {
+      const groupIds = o.groups ? [...new Set(o.groups.index)].sort((x, y) => x - y) : [0];
+      for (const g of groupIds) {
+        const members = sets.filter((_, i) => !o.groups || o.groups.index[i] === g);
+        b += `<path class="wire" d="${linkPath(members, o.links, place)}" fill="none" stroke="${o.groups ? colourOf(t, g) : t.series[0]}" stroke-opacity="0.45" stroke-width="1"/>`;
+      }
+    } else sets.forEach((c, i) => {
       const colour = o.groups ? colourOf(t, o.groups.index[i]) : t.series[0];
       const hull = convexHull(c.map(place));
       b += `<polygon class="raw-outline" points="${hull.map(p => `${f(p[0])},${f(p[1])}`).join(' ')}" fill="none" stroke="${colour}" stroke-opacity="0.45" stroke-width="1"><title>${esc(o.keys[i])}</title></polygon>`;
@@ -271,6 +289,7 @@
     const place = fitter([...aligned.flat(), ...cons], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
     let b = lg.svg + clouds(aligned, o.groups, place, t);
     for (const chain of curveChains(o.rows)) b += polyline(chain.map(i => place(cons[i])), 'curve-line', `stroke="${t.ink}" stroke-width="1.5" stroke-opacity="0.75"`);
+    if (hasLinks(o)) b += `<path class="wire" d="${linkPath([cons], o.links, place)}" fill="none" stroke="${t.ink}" stroke-width="1.5"/>`;
     const selectedIndex = o.selected != null ? o.keys.indexOf(o.selected) : -1;
     if (selectedIndex >= 0) {
       for (const p of aligned[selectedIndex]) {
@@ -284,6 +303,14 @@
       b += `<circle class="consensus" cx="${f(x)}" cy="${f(y)}" r="${curve ? 2.5 : 4.5}" fill="${t.ink}" stroke="${t.surface}" stroke-width="1.5"><title>${esc(r.id)}${r.label ? ` · ${esc(r.label)}` : ''}</title></circle>`;
       if (labelled && !curve) b += `<text x="${f(x + 8)}" y="${f(y - 8)}" fill="${t.ink}" font-weight="600">${esc(r.id)}</text>`;
     });
+    if (o.editing && !o.forExport) {
+      cons.forEach((p, i) => {
+        if (o.rows[i].type === 'curve') return;
+        const [x, y] = place(p);
+        if (o.linkStart === i) b += `<circle class="link-start" cx="${f(x)}" cy="${f(y)}" r="9" fill="none" stroke="${t.accent}" stroke-width="2.5"/>`;
+        b += `<circle class="lm-hit" data-lm="${i}" cx="${f(x)}" cy="${f(y)}" r="13" fill="transparent"/>`;
+      });
+    }
     return frame(W, H, t, 'Procrustes superimposition of all specimens with the consensus', b);
   }
 
@@ -300,6 +327,10 @@
     for (const chain of curveChains(o.rows)) {
       b += polyline(chain.map(i => place(mean[i])), 'curve-line', `stroke="${t.muted}" stroke-width="1.25" stroke-dasharray="3 3"`);
       b += polyline(chain.map(i => place(target[i])), 'curve-line', `stroke="${t.accent}" stroke-width="2"`);
+    }
+    if (hasLinks(o)) {
+      b += `<path class="wire-mean" d="${linkPath([mean], o.links, place)}" fill="none" stroke="${t.muted}" stroke-width="1.25" stroke-dasharray="3 3"/>`;
+      b += `<path class="wire-target" d="${linkPath([target], o.links, place)}" fill="none" stroke="${t.accent}" stroke-width="2"/>`;
     }
     mean.forEach((p, i) => {
       const [x0, y0] = place(p), [x1, y1] = place(target[i]);
