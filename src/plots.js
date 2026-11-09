@@ -222,25 +222,54 @@
   }
   const polyline = (pts, cls, attrs) => `<polyline class="${cls}" points="${pts.map(p => `${f(p[0])},${f(p[1])}`).join(' ')}" fill="none" ${attrs}/>`;
 
+  /** All points of all specimens as small dots, one path per group. */
+  function clouds(sets, groups, place, t) {
+    const n = sets.length;
+    const levels = groups ? groups.levels.map((_, i) => i) : [0];
+    const hasUngrouped = groups && groups.index.some(v => v < 0);
+    let out = '';
+    for (const g of hasUngrouped ? [...levels, -1] : levels) {
+      let d = '';
+      sets.forEach((c, i) => {
+        if (groups && groups.index[i] !== g) return;
+        for (const p of c) { const [x, y] = place(p); d += `M${f(x)} ${f(y)}h0`; }
+      });
+      const colour = groups ? colourOf(t, g) : t.series[0];
+      out += `<path class="cloud" d="${d}" stroke="${colour}" stroke-width="${n > 150 ? 2.5 : 3.5}" stroke-linecap="round" stroke-opacity="${n > 60 ? 0.45 : 0.7}" fill="none"/>`;
+    }
+    return out;
+  }
+
+  /** The specimens as digitised: true position, size and orientation, each with a faint outline so it reads as one object. */
+  function rawData(o) {
+    const W = o.width || 640, H = o.height || 520, t = o.theme;
+    const lg = groupLegend(o.groups, W, t);
+    const sets = o.matrix.map(c => project(c, o.view));
+    const place = fitter(sets.flat(), W, H, { l: 26, r: 26, t: 12 + lg.height, b: 16 });
+    let b = lg.svg;
+    sets.forEach((c, i) => {
+      const colour = o.groups ? colourOf(t, o.groups.index[i]) : t.series[0];
+      const hull = convexHull(c.map(place));
+      b += `<polygon class="raw-outline" points="${hull.map(p => `${f(p[0])},${f(p[1])}`).join(' ')}" fill="none" stroke="${colour}" stroke-opacity="0.45" stroke-width="1"><title>${esc(o.keys[i])}</title></polygon>`;
+    });
+    b += clouds(sets, o.groups, place, t);
+    const selectedIndex = o.selected != null ? o.keys.indexOf(o.selected) : -1;
+    if (selectedIndex >= 0) {
+      for (const p of sets[selectedIndex]) {
+        const [x, y] = place(p);
+        b += `<circle class="selected" cx="${f(x)}" cy="${f(y)}" r="4.5" fill="none" stroke="${t.ink}" stroke-width="1.75"/>`;
+      }
+    }
+    return frame(W, H, t, 'All specimens as digitised, before superimposition', b);
+  }
+
   function superimposition(o) {
     const W = o.width || 640, H = o.height || 520, t = o.theme;
     const lg = groupLegend(o.groups, W, t);
     const aligned = o.aligned.map(c => project(c, o.view));
     const cons = project(o.consensus, o.view);
     const place = fitter([...aligned.flat(), ...cons], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
-    const n = aligned.length;
-    let b = lg.svg;
-    const levels = o.groups ? o.groups.levels.map((_, i) => i) : [0];
-    const hasUngrouped = o.groups && o.groups.index.some(v => v < 0);
-    for (const g of hasUngrouped ? [...levels, -1] : levels) {
-      let d = '';
-      aligned.forEach((c, i) => {
-        if (o.groups && o.groups.index[i] !== g) return;
-        for (const p of c) { const [x, y] = place(p); d += `M${f(x)} ${f(y)}h0`; }
-      });
-      const colour = o.groups ? colourOf(t, g) : t.series[0];
-      b += `<path class="cloud" d="${d}" stroke="${colour}" stroke-width="${n > 150 ? 2.5 : 3.5}" stroke-linecap="round" stroke-opacity="${n > 60 ? 0.45 : 0.7}" fill="none"/>`;
-    }
+    let b = lg.svg + clouds(aligned, o.groups, place, t);
     for (const chain of curveChains(o.rows)) b += polyline(chain.map(i => place(cons[i])), 'curve-line', `stroke="${t.ink}" stroke-width="1.5" stroke-opacity="0.75"`);
     const selectedIndex = o.selected != null ? o.keys.indexOf(o.selected) : -1;
     if (selectedIndex >= 0) {
@@ -316,5 +345,5 @@
     return frame(W, H, t, 'Mean distance between replicates per landmark', b);
   }
 
-  return { THEMES, MAX_LEVELS, niceTicks, scatter, scree, project, turnView, superimposition, shapeChange, repeatabilityBars };
+  return { THEMES, MAX_LEVELS, niceTicks, scatter, scree, project, turnView, rawData, superimposition, shapeChange, repeatabilityBars };
 }));

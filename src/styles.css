@@ -81,6 +81,7 @@ td.why{color:var(--muted);font-size:11px}
 
 .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:10px;overflow-x:auto}
 .tab{background:none;border:0;border-bottom:2px solid transparent;padding:6px 12px;cursor:pointer;font-weight:500;color:var(--muted);margin-bottom:-1px;white-space:nowrap}
+.tab:disabled{opacity:.45;cursor:default}
 .tab.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
 .plot-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:4px}
 .plot-head h3{font-size:12.5px;font-weight:600}
@@ -88,6 +89,7 @@ td.why{color:var(--muted);font-size:11px}
 .ctrls{display:flex;gap:12px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
 .ctrls select{color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 6px;font-size:13px;margin-left:4px}
 .hint{font-size:12.5px;color:var(--muted)}
+.hint.grow{flex:1;min-width:180px}
 .plot svg{display:block;max-width:100%;height:auto}
 .plot.turn svg{cursor:grab}
 .plot.turn svg:active{cursor:grabbing}

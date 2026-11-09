@@ -78,7 +78,7 @@
       const head = 0.28 * gauss(r);
       const shape = body(depth, head, r, 0.035);
       const curve = curvePoints(shape[2], shape[3], 0.22, r, 0.02);
-      const placement = [70 + 22 * r(), 0.12 * gauss(r), 560 + 80 * r(), 330 + 40 * r()];
+      const placement = [38 + 44 * r(), 0.22 * gauss(r), 300 + 600 * r(), 230 + 240 * r()];
       const mirrored = i === 6;
       files.push({ name: `${id}.lmk.json`, data: JSON.stringify(makeDoc(id, 1, shape, curve, placement, r, 0, mirrored)) });
       if (i % 8 === 1) {

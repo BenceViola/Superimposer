@@ -317,6 +317,15 @@
     };
   }
 
+  /** Coordinates for showing the data as digitised. A flipped specimen is put back in its own place, as flipping is about x = 0. */
+  function rawCoords(prep) {
+    return prep.matrix.map((c, i) => {
+      if (!prep.specimens[i].flipped) return c;
+      const shift = -2 * c.reduce((s, p) => s + p[0], 0) / c.length;
+      return c.map(p => [p[0] + shift, ...p.slice(1)]);
+    });
+  }
+
   /* ---------- repeatability ---------- */
   /** Distances between replicates of one specimen by one operator, per landmark and per curve, in the data's units. */
   function repeatability(dataset) {
@@ -393,6 +402,6 @@
 
   return {
     symEig, centroidSize, rotateOnto, normalise, gpa, pca, shapeFromScores, shapeAt,
-    flagHigh, findMirrored, prepare, repeatability, analyse,
+    flagHigh, findMirrored, prepare, rawCoords, repeatability, analyse,
   };
 }));

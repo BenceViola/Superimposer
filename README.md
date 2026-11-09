@@ -5,6 +5,7 @@ A small browser tool for basic geometric morphometrics, made to go with [Landmar
 ## What it does
 
 - **Reads** `.lmk.json` files, TPS files (`LM=` and `LM3=`), and hand-in zips.
+- **Shows the raw data first**, as digitised. A button runs the fit, and another goes back, so the effect of the superimposition can be shown.
 - **Superimposes** by full generalised Procrustes analysis, with centroid size and tangent-space projection.
 - **Runs a PCA** on the tangent coordinates.
 - **Plots** the superimposition, morphospace, scree plot, shape change along any PC, centroid size against PCs, and repeatability per landmark. 3D figures turn by dragging.

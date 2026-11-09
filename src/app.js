@@ -15,7 +15,7 @@
     missing: 'specimens', replicates: 'all', semilandmarks: false,
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
     colour: '', labels: true, hulls: false, equal: true,
-    tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0, selected: null,
+    fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0, selected: null,
     view: IDENTITY.map(r => r.slice()),
   };
   window.__sup = { S };
@@ -77,7 +77,7 @@
     $('message').hidden = !(S.res && !S.res.ok);
     if (S.res && !S.res.ok) $('message').textContent = S.res.message;
     if (!S.res && has) { $('message').hidden = false; $('message').textContent = 'None of the files could be used. The notes on the left say why.'; }
-    $('bDownload').disabled = !ok;
+    $('bDownload').disabled = !(ok && S.fitted);
     $('bClear').disabled = !has;
     $('bGroups').disabled = !S.all.length;
     if (!has) return;
@@ -143,7 +143,7 @@
     // specimen table
     const inPrep = new Map(prep ? prep.specimens.map((s, i) => [s.key, i]) : []);
     const droppedBy = new Map(prep ? prep.dropped.specimens.map(x => [x.key, x.reason]) : []);
-    const ok = res && res.ok;
+    const ok = res && res.ok && S.fitted;
     $('tblSpecimens').innerHTML = '<thead><tr><th></th><th>Specimen</th><th class="num" title="Procrustes distance to the consensus">Dist.</th></tr></thead><tbody>' + d.specimens.map(s => {
       const off = S.excludeSpecimens.has(s.key);
       const i = inPrep.get(s.key);
@@ -199,7 +199,9 @@
     const base = { keys, selected: S.selected, groups, outliers: res.outliers, tips: tip, hulls: S.hulls };
     const col = c => res.pca.scores.map(r => r[c]);
     return {
-      super: (theme_, extra) => PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, selected: S.selected, view, labels: S.labels, theme: theme_ }, extra)),
+      super: (theme_, extra) => (!S.fitted
+        ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, selected: S.selected, view, theme: theme_ }, extra))
+        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, selected: S.selected, view, labels: S.labels, theme: theme_ }, extra))),
       scatter: (theme_, extra) => PL.scatter(Object.assign({}, base, { x: col(S.pcX), y: col(S.pcY), xLabel: pcName(S.pcX), yLabel: pcName(S.pcY), equal: S.equal, zeroLines: true, theme: theme_ }, extra)),
       scree: (theme_, extra) => PL.scree(Object.assign({ proportion: res.pca.proportion, theme: theme_, height: 190 }, extra)),
       shape: (theme_, extra) => PL.shapeChange(Object.assign(shapeOptions(theme_), extra)),
@@ -216,11 +218,19 @@
     return { width, height: Math.round(shares[name]) };
   }
 
+  const NEEDS_FIT = ['morpho', 'size'];
   const PLOT_IDS = { super: 'plotSuper', scatter: 'plotScatter', scree: 'plotScree', shape: 'plotShape', size: 'plotSize', repeat: 'plotRepeat' };
   const TAB_PLOTS = { super: ['super'], morpho: ['scatter', 'scree', 'shape'], size: ['size'], repeat: ['repeat'] };
 
   function renderFigures() {
     const { res } = S;
+    if (!S.fitted && NEEDS_FIT.includes(S.tab)) S.tab = 'super';
+    document.querySelectorAll('.tab').forEach(b => {
+      if (NEEDS_FIT.includes(b.dataset.tab)) {
+        b.disabled = !S.fitted;
+        b.title = S.fitted ? '' : 'Run the Procrustes fit first';
+      }
+    });
     document.querySelectorAll('.tab').forEach(b => { b.classList.toggle('on', b.dataset.tab === S.tab); b.setAttribute('aria-selected', b.dataset.tab === S.tab); });
     document.querySelectorAll('.panel').forEach(p => { p.hidden = p.dataset.panel !== S.tab; });
     fillPcSelect('selPcX', S.pcX);
@@ -236,7 +246,10 @@
     const is3D = res.prep.dim === 3;
     $('plotSuper').classList.toggle('turn', is3D);
     $('plotShape').classList.toggle('turn', is3D);
-    $('superHint').textContent = `${plural(res.prep.specimens.length, 'specimen')} aligned; the large points are the consensus.${is3D ? ' Drag to turn.' : ''}`;
+    $('bFit').textContent = S.fitted ? 'Show raw data' : 'Run Procrustes fit';
+    $('superHint').textContent = (S.fitted
+      ? `${plural(res.prep.specimens.length, 'specimen')} aligned; the large points are the consensus.`
+      : `${plural(res.prep.specimens.length, 'specimen')} as digitised (${unitWord(S.dataset.units)}, y up), before any alignment.`) + (is3D ? ' Drag to turn.' : '');
     const mixed = S.dataset.units === 'mixed';
     $('sizeWarn').hidden = !mixed;
     if (mixed) $('sizeWarn').textContent = 'These specimens are in different units, so their centroid sizes can’t be compared.';
@@ -270,6 +283,7 @@
     const files = [];
     for (const f of fileList) files.push({ name: f.name, data: await fileBytes(f) });
     const r = await IO.loadFiles(files);
+    S.fitted = false;
     S.all.push(...r.specimens);
     S.warnings.push(...r.warnings);
     S.refused.push(...r.refused);
@@ -294,7 +308,7 @@
   }
 
   function clearAll(draw) {
-    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, table: null, tableReport: '', dataset: null, res: null, repeat: null, selected: null, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
+    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, table: null, tableReport: '', dataset: null, res: null, repeat: null, selected: null, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
     S.flip = new Set(); S.excludeSpecimens = new Set(); S.excludePoints = new Set();
     if (draw !== false) render();
   }
@@ -327,7 +341,7 @@
   function exportFigure(name, kind) {
     const svg = figureBuilders()[name](PL.THEMES.light, { forExport: true });
     if (!svg) return;
-    const file = FIG_NAMES[name];
+    const file = name === 'super' && !S.fitted ? 'raw-data' : FIG_NAMES[name];
     if (kind === 'svg') { save(new Blob([svg], { type: 'image/svg+xml' }), `${file}.svg`); return; }
     const img = new Image();
     img.onload = () => {
@@ -357,6 +371,7 @@
     if (f) { useTable(await f.text(), f.name); rerun(); }
     e.target.value = '';
   });
+  on($('bFit'), 'click', () => { S.fitted = !S.fitted; render(); });
   on($('bConfirmTps'), 'click', () => { S.confirmTps = true; rerun(); });
   on($('bFlipAll'), 'click', () => { for (const k of S.res.mirrored) S.flip.add(k); rerun(); });
   on($('bUnflip'), 'click', () => { S.flip = new Set(); rerun(); });
