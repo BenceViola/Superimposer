@@ -195,6 +195,45 @@
     return shapeFromScores(res, s);
   }
 
+  /* ---------- thin-plate spline ---------- */
+  /** Solve A·X = B for several right-hand sides by elimination with pivoting, or null if A is singular. */
+  function solve(A, B) {
+    const n = A.length, M = A.map((r, i) => [...r, ...B[i]]);
+    const scale = Math.max(...A.flat().map(Math.abs)) || 1;
+    for (let c = 0; c < n; c++) {
+      let best = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[best][c])) best = r;
+      if (Math.abs(M[best][c]) < 1e-11 * scale) return null;
+      [M[c], M[best]] = [M[best], M[c]];
+      for (let r = 0; r < n; r++) {
+        if (r === c) continue;
+        const k = M[r][c] / M[c][c];
+        if (k) for (let j = c; j < M[r].length; j++) M[r][j] -= k * M[c][j];
+      }
+    }
+    return M.map((row, i) => row.slice(n).map(v => v / row[i]));
+  }
+
+  /** The 2D thin-plate spline taking source onto target, as a function of a point; null if the landmarks can't define one. */
+  function tpsWarp(source, target) {
+    const n = source.length;
+    const U = (a, b) => { const r2 = (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2; return r2 > 0 ? r2 * Math.log(r2) : 0; };
+    const L = Array.from({ length: n + 3 }, () => new Array(n + 3).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) L[i][j] = U(source[i], source[j]);
+      const q = [1, source[i][0], source[i][1]];
+      for (let k = 0; k < 3; k++) { L[i][n + k] = q[k]; L[n + k][i] = q[k]; }
+    }
+    const rhs = [...target.map(p => [p[0], p[1]]), [0, 0], [0, 0], [0, 0]];
+    const coef = solve(L, rhs);
+    if (!coef) return null;
+    return p => [0, 1].map(d => {
+      let v = coef[n][d] + coef[n + 1][d] * p[0] + coef[n + 2][d] * p[1];
+      for (let i = 0; i < n; i++) v += coef[i][d] * U(p, source[i]);
+      return v;
+    });
+  }
+
   /* ---------- checks ---------- */
   function quantile(sorted, q) {
     const at = (sorted.length - 1) * q, lo = Math.floor(at), hi = Math.ceil(at);
@@ -401,7 +440,7 @@
   }
 
   return {
-    symEig, centroidSize, rotateOnto, normalise, gpa, pca, shapeFromScores, shapeAt,
+    tpsWarp, symEig, centroidSize, rotateOnto, normalise, gpa, pca, shapeFromScores, shapeAt,
     flagHigh, findMirrored, prepare, rawCoords, repeatability, analyse,
   };
 }));

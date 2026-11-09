@@ -41,21 +41,54 @@
     return out;
   }
 
+  const MARKER_NAMES = ['Circle', 'Square', 'Triangle', 'Diamond', 'Inverted triangle', 'Hexagon', 'Right-pointing triangle', 'Left-pointing triangle'];
+
+  /** Corner offsets of a marker shape, or null for the circle. */
+  function markerCorners(index, r) {
+    const shape = ((index % MAX_LEVELS) + MAX_LEVELS) % MAX_LEVELS;
+    const q = r * 0.9, k = r * 1.2;
+    return [
+      null,
+      [[-q, -q], [q, -q], [q, q], [-q, q]],
+      [[0, -k], [k, q], [-k, q]],
+      [[0, -k], [k, 0], [0, k], [-k, 0]],
+      [[0, k], [k, -q], [-k, -q]],
+      [[-k, 0], [-q / 2, -q], [q / 2, -q], [k, 0], [q / 2, q], [-q / 2, q]],
+      [[k, 0], [-q, -q], [-q, q]],
+      [[-k, 0], [q, -q], [q, q]],
+    ][shape];
+  }
+
   /** The eight marker shapes, in the same order as the colours: colour is never the only cue. */
   function marker(index, x, y, r, attrs) {
-    const shape = ((index % MAX_LEVELS) + MAX_LEVELS) % MAX_LEVELS;
-    const poly = pts => `<polygon points="${pts.map(([a, b]) => `${f(x + a)},${f(y + b)}`).join(' ')}" ${attrs}/>`;
-    const q = r * 0.9, k = r * 1.2;
-    switch (shape) {
-      case 0: return `<circle cx="${f(x)}" cy="${f(y)}" r="${f(r)}" ${attrs}/>`;
-      case 1: return poly([[-q, -q], [q, -q], [q, q], [-q, q]]);
-      case 2: return poly([[0, -k], [k, q], [-k, q]]);
-      case 3: return poly([[0, -k], [k, 0], [0, k], [-k, 0]]);
-      case 4: return poly([[0, k], [k, -q], [-k, -q]]);
-      case 5: return poly([[-k, 0], [-q / 2, -q], [q / 2, -q], [k, 0], [q / 2, q], [-q / 2, q]]);
-      case 6: return poly([[k, 0], [-q, -q], [-q, q]]);
-      default: return poly([[-k, 0], [q, -q], [q, q]]);
-    }
+    const corners = markerCorners(index, r);
+    if (!corners) return `<circle cx="${f(x)}" cy="${f(y)}" r="${f(r)}" ${attrs}/>`;
+    return `<polygon points="${corners.map(([a, b]) => `${f(x + a)},${f(y + b)}`).join(' ')}" ${attrs}/>`;
+  }
+
+  /* ---------- specimen styles ---------- */
+  /**
+   * Colour and marker of each specimen: from its group, unless overridden.
+   * colour is a palette position, 'muted', or a '#rrggbb' chosen by the user. overrides: { key: { colour?, marker? } }.
+   */
+  function resolveStyles(keys, groups, overrides) {
+    return keys.map((key, i) => {
+      const g = groups ? groups.index[i] : 0;
+      const base = g >= 0 ? { colour: g % MAX_LEVELS, marker: g % MAX_LEVELS } : { colour: 'muted', marker: 0 };
+      const over = overrides && overrides[key];
+      return Object.assign(base, over, { overridden: !!over });
+    });
+  }
+  function colourValue(colour, theme) {
+    if (colour === 'muted') return theme.muted;
+    return typeof colour === 'number' ? theme.series[colour % MAX_LEVELS] : colour;
+  }
+  const paintList = (o, t) => (o.styles || resolveStyles(o.keys, o.groups, {})).map(st => ({ fill: colourValue(st.colour, t), marker: st.marker }));
+  const selectedKeys = o => new Set(o.selected == null ? [] : [].concat(o.selected));
+
+  function markerIcon(style, theme, size) {
+    const n = size || 14;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" width="${n}" height="${n}" aria-hidden="true">${marker(style.marker, 7, 7, 4.4, `fill="${colourValue(style.colour, theme)}"`)}</svg>`;
   }
 
   /** Legend entries in one row above the plot; they wrap when needed. Returns svg and the height it takes. */
@@ -126,8 +159,8 @@
     }
     b += `<text x="${m.l + pw / 2}" y="${H - 10}" fill="${t.ink}" text-anchor="middle">${esc(o.xLabel)}</text>`;
     b += `<text transform="translate(16 ${m.t + ph / 2}) rotate(-90)" fill="${t.ink}" text-anchor="middle">${esc(o.yLabel)}</text>`;
-    b += `<g data-scale="${sx.toFixed(4)},${sy.toFixed(4)}">`;
-    const groupIndex = i => (o.groups ? o.groups.index[i] : o.groups === undefined ? 0 : 0);
+    b += `<g data-scale="${sx.toFixed(4)},${sy.toFixed(4)}" data-map="${[m.l, m.t, pw, ph, x0, y0, sx, sy].map(v => Number(v.toPrecision(10))).join(',')}">`;
+    const paints = paintList(o, t), chosen = selectedKeys(o);
     if (o.hulls && o.groups) {
       o.groups.levels.forEach((_, g) => {
         const pts = o.x.map((v, i) => [X(v), Y(o.y[i]), i]).filter(p => o.groups.index[p[2]] === g).map(p => [p[0], p[1]]);
@@ -138,14 +171,13 @@
     }
     const labels = [];
     o.x.forEach((v, i) => {
-      const g = groupIndex(i), px = X(v), py = Y(o.y[i]);
-      const sel = o.selected != null && o.keys[i] === o.selected;
-      const fill = o.groups ? colourOf(t, g) : t.series[0];
-      const attrs = `fill="${fill}" stroke="${sel ? t.ink : t.surface}" stroke-width="${sel ? 2 : 1.5}"`;
+      const px = X(v), py = Y(o.y[i]);
+      const sel = chosen.has(o.keys[i]);
+      const attrs = `fill="${paints[i].fill}" stroke="${sel ? t.ink : t.surface}" stroke-width="${sel ? 2 : 1.5}"`;
       const tip = [o.keys[i], o.tips ? o.tips[i] : ''].filter(Boolean).join(' · ');
       b += `<g class="pt" data-i="${i}"><title>${esc(tip)}</title>`;
       if (!o.forExport) b += `<circle class="hit" cx="${f(px)}" cy="${f(py)}" r="12" fill="transparent"/>`;
-      b += marker(o.groups ? g : 0, px, py, sel ? 6.5 : 5, attrs) + '</g>';
+      b += marker(paints[i].marker, px, py, sel ? 6.5 : 5, attrs) + '</g>';
       if (sel || (o.outliers && o.outliers[i])) labels.push([px, py, o.keys[i]]);
     });
     b += '</g>';
@@ -153,7 +185,19 @@
       const right = px < W - 90;
       b += `<text class="pt-label" x="${f(px + (right ? 9 : -9))}" y="${f(py - 7)}" fill="${t.ink}" text-anchor="${right ? 'start' : 'end'}">${esc(label)}</text>`;
     }
+    for (const v of o.virtual || []) {
+      const px = X(v.x), py = Y(v.y), c = 6;
+      b += `<g class="virtual"><path d="M${f(px - c)} ${f(py - c)}L${f(px + c)} ${f(py + c)}M${f(px - c)} ${f(py + c)}L${f(px + c)} ${f(py - c)}" stroke="${t.ink}" stroke-width="2"/>`
+        + `<text x="${f(px + 10)}" y="${f(py - 7)}" fill="${t.ink}">${esc(v.label)}</text></g>`;
+    }
     return frame(W, H, t, o.title || `${o.xLabel} against ${o.yLabel}`, b);
+  }
+
+  /** Pixel position in a scatter → data values, or null outside the plot area. map: the figure's data-map. */
+  function pixelToData(map, px, py) {
+    const [ml, mt, pw, ph, x0, y0, sx, sy] = map.split(',').map(Number);
+    if (px < ml || px > ml + pw || py < mt || py > mt + ph) return null;
+    return [x0 + (px - ml) / sx, y0 + (mt + ph - py) / sy];
   }
 
   /* ---------- scree ---------- */
@@ -222,20 +266,29 @@
   }
   const polyline = (pts, cls, attrs) => `<polyline class="${cls}" points="${pts.map(p => `${f(p[0])},${f(p[1])}`).join(' ')}" fill="none" ${attrs}/>`;
 
-  /** All points of all specimens as small dots, one path per group. */
-  function clouds(sets, groups, place, t) {
-    const n = sets.length;
-    const levels = groups ? groups.levels.map((_, i) => i) : [0];
-    const hasUngrouped = groups && groups.index.some(v => v < 0);
+  /** All points of all specimens as small marks, one path per colour and marker. */
+  function clouds(sets, paints, place) {
+    const n = sets.length, batches = new Map();
+    sets.forEach((c, i) => {
+      const k = `${paints[i].fill}|${paints[i].marker}`;
+      if (!batches.has(k)) batches.set(k, { fill: paints[i].fill, marker: paints[i].marker, sets: [] });
+      batches.get(k).sets.push(c);
+    });
+    const opacity = n > 60 ? 0.45 : 0.7;
+    const r = n > 150 ? 2.2 : 3;
     let out = '';
-    for (const g of hasUngrouped ? [...levels, -1] : levels) {
+    for (const b of batches.values()) {
       let d = '';
-      sets.forEach((c, i) => {
-        if (groups && groups.index[i] !== g) return;
-        for (const p of c) { const [x, y] = place(p); d += `M${f(x)} ${f(y)}h0`; }
-      });
-      const colour = groups ? colourOf(t, g) : t.series[0];
-      out += `<path class="cloud" d="${d}" stroke="${colour}" stroke-width="${n > 150 ? 2.5 : 3.5}" stroke-linecap="round" stroke-opacity="${n > 60 ? 0.45 : 0.7}" fill="none"/>`;
+      const corners = markerCorners(b.marker, r);
+      for (const c of b.sets) {
+        for (const p of c) {
+          const [x, y] = place(p);
+          d += corners ? `M${corners.map(([a, q]) => `${f(x + a)} ${f(y + q)}`).join('L')}z` : `M${f(x)} ${f(y)}h0`;
+        }
+      }
+      out += corners
+        ? `<path class="cloud" d="${d}" fill="${b.fill}" fill-opacity="${opacity}"/>`
+        : `<path class="cloud" d="${d}" stroke="${b.fill}" stroke-width="${n > 150 ? 2.5 : 3.5}" stroke-linecap="round" stroke-opacity="${opacity}" fill="none"/>`;
     }
     return out;
   }
@@ -259,25 +312,27 @@
     const sets = o.matrix.map(c => project(c, o.view));
     const place = fitter(sets.flat(), W, H, { l: 26, r: 26, t: 12 + lg.height, b: 16 });
     let b = lg.svg;
+    const paints = paintList(o, t);
     if (hasLinks(o)) {
-      const groupIds = o.groups ? [...new Set(o.groups.index)].sort((x, y) => x - y) : [0];
-      for (const g of groupIds) {
-        const members = sets.filter((_, i) => !o.groups || o.groups.index[i] === g);
-        b += `<path class="wire" d="${linkPath(members, o.links, place)}" fill="none" stroke="${o.groups ? colourOf(t, g) : t.series[0]}" stroke-opacity="0.45" stroke-width="1"/>`;
+      for (const fill of new Set(paints.map(x => x.fill))) {
+        const members = sets.filter((_, i) => paints[i].fill === fill);
+        b += `<path class="wire" d="${linkPath(members, o.links, place)}" fill="none" stroke="${fill}" stroke-opacity="0.45" stroke-width="1"/>`;
       }
-    } else sets.forEach((c, i) => {
-      const colour = o.groups ? colourOf(t, o.groups.index[i]) : t.series[0];
-      const hull = convexHull(c.map(place));
-      b += `<polygon class="raw-outline" points="${hull.map(p => `${f(p[0])},${f(p[1])}`).join(' ')}" fill="none" stroke="${colour}" stroke-opacity="0.45" stroke-width="1"><title>${esc(o.keys[i])}</title></polygon>`;
-    });
-    b += clouds(sets, o.groups, place, t);
-    const selectedIndex = o.selected != null ? o.keys.indexOf(o.selected) : -1;
-    if (selectedIndex >= 0) {
-      for (const p of sets[selectedIndex]) {
+    } else {
+      sets.forEach((c, i) => {
+        const hull = convexHull(c.map(place));
+        b += `<polygon class="raw-outline" points="${hull.map(p => `${f(p[0])},${f(p[1])}`).join(' ')}" fill="none" stroke="${paints[i].fill}" stroke-opacity="0.45" stroke-width="1"><title>${esc(o.keys[i])}</title></polygon>`;
+      });
+    }
+    b += clouds(sets, paints, place);
+    const chosen = selectedKeys(o);
+    sets.forEach((c, i) => {
+      if (!chosen.has(o.keys[i])) return;
+      for (const p of c) {
         const [x, y] = place(p);
         b += `<circle class="selected" cx="${f(x)}" cy="${f(y)}" r="4.5" fill="none" stroke="${t.ink}" stroke-width="1.75"/>`;
       }
-    }
+    });
     return frame(W, H, t, 'All specimens as digitised, before superimposition', b);
   }
 
@@ -287,16 +342,17 @@
     const aligned = o.aligned.map(c => project(c, o.view));
     const cons = project(o.consensus, o.view);
     const place = fitter([...aligned.flat(), ...cons], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
-    let b = lg.svg + clouds(aligned, o.groups, place, t);
+    let b = lg.svg + clouds(aligned, paintList(o, t), place);
     for (const chain of curveChains(o.rows)) b += polyline(chain.map(i => place(cons[i])), 'curve-line', `stroke="${t.ink}" stroke-width="1.5" stroke-opacity="0.75"`);
     if (hasLinks(o)) b += `<path class="wire" d="${linkPath([cons], o.links, place)}" fill="none" stroke="${t.ink}" stroke-width="1.5"/>`;
-    const selectedIndex = o.selected != null ? o.keys.indexOf(o.selected) : -1;
-    if (selectedIndex >= 0) {
-      for (const p of aligned[selectedIndex]) {
+    const chosen = selectedKeys(o);
+    aligned.forEach((c, i) => {
+      if (!chosen.has(o.keys[i])) return;
+      for (const p of c) {
         const [x, y] = place(p);
         b += `<circle class="selected" cx="${f(x)}" cy="${f(y)}" r="4.5" fill="none" stroke="${t.ink}" stroke-width="1.75"/>`;
       }
-    }
+    });
     const labelled = o.labels !== false && o.rows.filter(r => r.type !== 'curve').length <= 40;
     cons.forEach((p, i) => {
       const [x, y] = place(p), r = o.rows[i], curve = r.type === 'curve';
@@ -314,38 +370,85 @@
     return frame(W, H, t, 'Procrustes superimposition of all specimens with the consensus', b);
   }
 
+  /** A regular grid around the shape, carried through the warp, as lines of points. */
+  function warpedGrid(shape, warp) {
+    const xs = shape.map(p => p[0]), ys = shape.map(p => p[1]);
+    const w = Math.max(...xs) - Math.min(...xs) || 1, h = Math.max(...ys) - Math.min(...ys) || 1;
+    const pad = 0.15 * Math.max(w, h), cell = (Math.max(w, h) + 2 * pad) / 14;
+    const x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad;
+    const nx = Math.ceil((w + 2 * pad) / cell), ny = Math.ceil((h + 2 * pad) / cell);
+    const STEPS = 6, lines = [];
+    for (let i = 0; i <= nx; i++) {
+      lines.push(Array.from({ length: ny * STEPS + 1 }, (_, k) => warp([x0 + i * cell, y0 + (k / STEPS) * cell])));
+    }
+    for (let j = 0; j <= ny; j++) {
+      lines.push(Array.from({ length: nx * STEPS + 1 }, (_, k) => warp([x0 + (k / STEPS) * cell, y0 + j * cell])));
+    }
+    return lines;
+  }
+
   function shapeChange(o) {
     const W = o.width || 520, H = o.height || 420, t = o.theme;
+    const colour = o.targetColour || t.accent;
     const mean = project(o.mean, o.view), target = project(o.target, o.view);
+    const lines = o.warp ? warpedGrid(mean, o.warp) : null;
     const items = [
-      { label: 'Mean shape', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4" fill="none" stroke="${t.muted}" stroke-width="1.5"/>` },
-      { label: o.targetLabel || 'Target', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4.5" fill="${t.accent}"/>` },
+      lines
+        ? { label: 'Deformation grid', mark: (x, y) => `<path d="M${x - 5} ${y - 3}h10M${x - 5} ${y + 3}h10M${x - 2.5} ${y - 6}v12M${x + 2.5} ${y - 6}v12" stroke="${t.muted}" fill="none"/>` }
+        : { label: 'Mean shape', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4" fill="none" stroke="${t.muted}" stroke-width="1.5"/>` },
+      { label: o.targetLabel || 'Target', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4.5" fill="${colour}"/>` },
     ];
     const lg = legend(items, W, t);
-    const place = fitter([...mean, ...target], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
+    const place = fitter(lines ? [...lines.flat(), ...target] : [...mean, ...target], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
     let b = lg.svg;
+    if (lines) {
+      const d = lines.map(line => `M${line.map(p => { const [x, y] = place(p); return `${f(x)} ${f(y)}`; }).join('L')}`).join('');
+      b += `<path class="tps-grid" d="${d}" fill="none" stroke="${t.muted}" stroke-opacity="0.55" stroke-width="0.9"/>`;
+    }
     for (const chain of curveChains(o.rows)) {
-      b += polyline(chain.map(i => place(mean[i])), 'curve-line', `stroke="${t.muted}" stroke-width="1.25" stroke-dasharray="3 3"`);
-      b += polyline(chain.map(i => place(target[i])), 'curve-line', `stroke="${t.accent}" stroke-width="2"`);
+      if (!lines) b += polyline(chain.map(i => place(mean[i])), 'curve-line', `stroke="${t.muted}" stroke-width="1.25" stroke-dasharray="3 3"`);
+      b += polyline(chain.map(i => place(target[i])), 'curve-line', `stroke="${colour}" stroke-width="2"`);
     }
     if (hasLinks(o)) {
-      b += `<path class="wire-mean" d="${linkPath([mean], o.links, place)}" fill="none" stroke="${t.muted}" stroke-width="1.25" stroke-dasharray="3 3"/>`;
-      b += `<path class="wire-target" d="${linkPath([target], o.links, place)}" fill="none" stroke="${t.accent}" stroke-width="2"/>`;
+      if (!lines) b += `<path class="wire-mean" d="${linkPath([mean], o.links, place)}" fill="none" stroke="${t.muted}" stroke-width="1.25" stroke-dasharray="3 3"/>`;
+      b += `<path class="wire-target" d="${linkPath([target], o.links, place)}" fill="none" stroke="${colour}" stroke-width="2"/>`;
     }
     mean.forEach((p, i) => {
       const [x0, y0] = place(p), [x1, y1] = place(target[i]);
-      const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
       const curve = o.rows[i].type === 'curve';
-      b += `<line class="arrow" x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" stroke="${t.accent}" stroke-width="1.5" stroke-opacity="0.8"/>`;
-      if (len > 8) {
-        const ux = dx / len, uy = dy / len, s = 5;
-        b += `<polygon points="${f(x1)},${f(y1)} ${f(x1 - s * ux + s * 0.5 * uy)},${f(y1 - s * uy - s * 0.5 * ux)} ${f(x1 - s * ux - s * 0.5 * uy)},${f(y1 - s * uy + s * 0.5 * ux)}" fill="${t.accent}"/>`;
+      if (!lines) {
+        const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+        b += `<line class="arrow" x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" stroke="${colour}" stroke-width="1.5" stroke-opacity="0.8"/>`;
+        if (len > 8) {
+          const ux = dx / len, uy = dy / len, s = 5;
+          b += `<polygon points="${f(x1)},${f(y1)} ${f(x1 - s * ux + s * 0.5 * uy)},${f(y1 - s * uy - s * 0.5 * ux)} ${f(x1 - s * ux - s * 0.5 * uy)},${f(y1 - s * uy + s * 0.5 * ux)}" fill="${colour}"/>`;
+        }
+        b += `<circle class="mean" cx="${f(x0)}" cy="${f(y0)}" r="${curve ? 2 : 3.5}" fill="${t.surface}" stroke="${t.muted}" stroke-width="1.25"/>`;
       }
-      b += `<circle class="mean" cx="${f(x0)}" cy="${f(y0)}" r="${curve ? 2 : 3.5}" fill="${t.surface}" stroke="${t.muted}" stroke-width="1.25"/>`;
-      b += `<circle class="target" cx="${f(x1)}" cy="${f(y1)}" r="${curve ? 2.25 : 4}" fill="${t.accent}" stroke="${t.surface}" stroke-width="1"><title>${esc(o.rows[i].id)}</title></circle>`;
+      b += `<circle class="target" cx="${f(x1)}" cy="${f(y1)}" r="${curve ? 2.25 : 4}" fill="${colour}" stroke="${t.surface}" stroke-width="1"><title>${esc(o.rows[i].id)}</title></circle>`;
       if (o.labels !== false && !curve && mean.length <= 40) b += `<text x="${f(x1 + 7)}" y="${f(y1 - 7)}" fill="${t.ink}">${esc(o.rows[i].id)}</text>`;
     });
     return frame(W, H, t, `Shape change from the mean to ${o.targetLabel || 'the target'}`, b);
+  }
+
+  /** Up to a few shapes in one figure: one large, more in two columns (one on a narrow screen). */
+  function shapeGrid(o) {
+    const items = o.items;
+    if (!items.length) return '';
+    const W = o.width || 520, t = o.theme, n = items.length;
+    const cols = n === 1 || W < 360 ? 1 : 2;
+    const rows = Math.ceil(n / cols);
+    const tileW = Math.floor(W / cols), tileH = Math.round(n === 1 ? W * 0.8 : tileW * 0.9);
+    let b = '';
+    items.forEach((it, i) => {
+      const svg = shapeChange({
+        mean: o.mean, target: it.target, rows: o.rows, links: o.links, view: o.view, theme: t,
+        labels: n === 1 && o.labels !== false, width: tileW, height: tileH,
+        targetLabel: it.label, targetColour: it.colour, warp: it.warp,
+      });
+      b += svg.replace('<svg ', `<svg x="${(i % cols) * tileW}" y="${Math.floor(i / cols) * tileH}" `);
+    });
+    return frame(W, rows * tileH, t, 'Landmark configurations of the selected specimens', b);
   }
 
   /* ---------- repeatability ---------- */
@@ -376,5 +479,5 @@
     return frame(W, H, t, 'Mean distance between replicates per landmark', b);
   }
 
-  return { THEMES, MAX_LEVELS, niceTicks, scatter, scree, project, turnView, rawData, superimposition, shapeChange, repeatabilityBars };
+  return { THEMES, MAX_LEVELS, MARKER_NAMES, resolveStyles, colourValue, markerIcon, pixelToData, shapeGrid, niceTicks, scatter, scree, project, turnView, rawData, superimposition, shapeChange, repeatabilityBars };
 }));

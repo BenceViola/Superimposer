@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const PL = require('../../src/plots.js');
 const IO = require('../../src/io.js');
 const GM = require('../../src/gm.js');
-const { doc2d, tpl2d, rng } = require('./helpers.js');
+const { doc2d, tpl2d, rng, near } = require('./helpers.js');
 
 const count = (s, re) => (s.match(re) || []).length;
 const wellFormed = s => {
