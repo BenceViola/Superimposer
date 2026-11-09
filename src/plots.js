@@ -174,8 +174,8 @@
       const x = m.l + step * i + (step - bw) / 2, y = Y(v), base = m.t + ph;
       const r = Math.min(radius, base - y);
       b += `<path class="bar" d="M${f(x)} ${f(base)}V${f(y + r)}q0 ${f(-r)} ${f(r)} ${f(-r)}h${f(bw - 2 * r)}q${f(r)} 0 ${f(r)} ${f(r)}V${f(base)}z" fill="${t.series[0]}"><title>PC${i + 1}: ${(v * 100).toFixed(1)}%</title></path>`;
-      b += `<text x="${f(x + bw / 2)}" y="${base + 16}" fill="${t.muted}" text-anchor="middle">PC${i + 1}</text>`;
-      if (i < 4) b += `<text x="${f(x + bw / 2)}" y="${f(y - 5)}" fill="${t.ink}" text-anchor="middle">${(v * 100).toFixed(1)}%</text>`;
+      if (step >= 34 || i % 2 === 0) b += `<text x="${f(x + bw / 2)}" y="${base + 16}" fill="${t.muted}" text-anchor="middle">PC${i + 1}</text>`;
+      if (i < (step >= 34 ? 4 : 2)) b += `<text x="${f(x + bw / 2)}" y="${f(y - 5)}" fill="${t.ink}" text-anchor="middle">${(v * 100).toFixed(1)}%</text>`;
     });
     b += `<line x1="${m.l}" x2="${m.l + pw}" y1="${m.t + ph}" y2="${m.t + ph}" stroke="${t.muted}"/>`;
     return frame(W, H, t, 'Share of shape variance per principal component', b);
@@ -227,7 +227,7 @@
     const lg = groupLegend(o.groups, W, t);
     const aligned = o.aligned.map(c => project(c, o.view));
     const cons = project(o.consensus, o.view);
-    const place = fitter([...aligned.flat(), ...cons], W, H, { l: 26, r: 26, t: 12 + lg.height, b: 16 });
+    const place = fitter([...aligned.flat(), ...cons], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
     const n = aligned.length;
     let b = lg.svg;
     const levels = o.groups ? o.groups.levels.map((_, i) => i) : [0];
@@ -266,7 +266,7 @@
       { label: o.targetLabel || 'Target', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4.5" fill="${t.accent}"/>` },
     ];
     const lg = legend(items, W, t);
-    const place = fitter([...mean, ...target], W, H, { l: 26, r: 26, t: 12 + lg.height, b: 16 });
+    const place = fitter([...mean, ...target], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
     let b = lg.svg;
     for (const chain of curveChains(o.rows)) {
       b += polyline(chain.map(i => place(mean[i])), 'curve-line', `stroke="${t.muted}" stroke-width="1.25" stroke-dasharray="3 3"`);
@@ -291,7 +291,7 @@
   /* ---------- repeatability ---------- */
   function repeatabilityBars(o) {
     const t = o.theme, rows = o.rows.filter(r => r.mean != null).sort((a, b) => b.mean - a.mean);
-    const rowH = 24, W = o.width || 640, m = { l: 150, r: 74, t: 26, b: 42 };
+    const rowH = 24, W = o.width || 640, m = { l: 172, r: 74, t: 26, b: 42 };
     const H = m.t + m.b + rowH * Math.max(1, rows.length);
     const pw = W - m.l - m.r, top = Math.max(...rows.map(r => r.mean), o.median || 0, 1e-9) * 1.05;
     const X = v => m.l + (v / top) * pw;
@@ -304,7 +304,7 @@
     rows.forEach((r, i) => {
       const y = m.t + i * rowH + 4, h = rowH - 8, w = Math.max(1, X(r.mean) - m.l), rad = Math.min(4, w / 2);
       const label = r.name ? `${r.id} · ${r.name}` : r.id;
-      b += `<text x="${m.l - 8}" y="${y + h - 3}" fill="${t.ink}" text-anchor="end">${esc(label.length > 24 ? `${label.slice(0, 23)}…` : label)}</text>`;
+      b += `<text x="${m.l - 8}" y="${y + h - 3}" fill="${t.ink}" text-anchor="end">${esc(label.length > 23 ? `${label.slice(0, 22)}…` : label)}</text>`;
       b += `<path class="bar" d="M${m.l} ${y}h${f(w - rad)}q${f(rad)} 0 ${f(rad)} ${f(rad)}v${f(h - 2 * rad)}q0 ${f(rad)} ${f(-rad)} ${f(rad)}h${f(rad - w)}z" fill="${r.flag ? t.warn : t.series[0]}"><title>${esc(r.id)}: mean ${r.mean.toPrecision(3)}, over ${r.pairs} pair${r.pairs === 1 ? '' : 's'}</title></path>`;
       b += `<text x="${f(X(r.mean) + 6)}" y="${y + h - 3}" fill="${r.flag ? t.ink : t.muted}" font-weight="${r.flag ? 600 : 400}">${r.mean.toPrecision(3)}${r.flag ? ' · check' : ''}</text>`;
     });

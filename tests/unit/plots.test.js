@@ -193,3 +193,10 @@ test('all figures are readable by themselves: they carry a background and fonts'
   assert.ok(s.includes(`fill="${PL.THEMES.light.surface}"`));
   assert.match(s, /font-family=/);
 });
+
+test('scree: on a narrow figure only every other component is named', () => {
+  const s = PL.scree({ proportion: Array(12).fill(1 / 12), theme: PL.THEMES.light, width: 320 });
+  assert.match(s, />PC1</);
+  assert.doesNotMatch(s, />PC2</);
+  assert.match(s, />PC3</);
+});

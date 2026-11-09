@@ -119,6 +119,7 @@ test('leaving out a specimen or a landmark by hand', async ({ page }) => {
   const p = await page.evaluate(() => window.__sup.S.res.prep.rows.length);
   await page.locator('#tblSpecimens input[type=checkbox]').first().uncheck();
   expect(await page.evaluate(() => window.__sup.S.res.prep.specimens.length)).toBe(n - 1);
+  await page.locator('details:has(#tblPoints) summary').click();
   await page.locator('#tblPoints input[type=checkbox]').first().uncheck();
   expect(await page.evaluate(() => window.__sup.S.res.prep.rows.length)).toBe(p - 1);
 });
@@ -127,7 +128,7 @@ test('a click in the morphospace selects the specimen', async ({ page }) => {
   await openApp(page);
   await loadExample(page);
   await page.click('[data-tab="morpho"]');
-  await page.locator('#plotScatter .pt').nth(3).click();
+  await page.locator('#plotScatter .pt').nth(3).dispatchEvent('click');
   await expect(page.locator('#selectionNote')).toContainText('EX_');
   await expect(page.locator('#plotScatter .pt-label')).not.toHaveCount(0);
   await page.click('[data-tab="super"]');
@@ -191,4 +192,26 @@ test('it works at phone width', async ({ page }) => {
   await loadExample(page);
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(over).toBeLessThanOrEqual(0);
+});
+
+test('figures are drawn at the width of their panel, so text stays its real size', async ({ page }) => {
+  await openApp(page);
+  await loadExample(page);
+  for (const tab of ['super', 'size', 'repeat']) {
+    await page.click(`[data-tab="${tab}"]`);
+    const r = await page.evaluate(() => {
+      const svg = document.querySelector('.panel:not([hidden]) .plot svg');
+      return { attr: Number(svg.getAttribute('width')), real: svg.getBoundingClientRect().width };
+    });
+    expect(Math.abs(r.attr - r.real)).toBeLessThan(2);
+  }
+});
+
+test('the figures follow the window size', async ({ page }) => {
+  await openApp(page);
+  await loadExample(page);
+  const width = () => page.evaluate(() => Number(document.querySelector('#plotSuper svg').getAttribute('width')));
+  const before = await width();
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await expect.poll(width).toBeLessThan(before);
 });

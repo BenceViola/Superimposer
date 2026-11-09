@@ -63,7 +63,7 @@
       template,
       landmarks: shape.map((p, i) => ({ id: ids[i], template_id: ids[i], status: 'placed', position: put(p) })),
       curves: [{ id: 'C01', template_id: 'C01', status: 'placed', points: curveShape.map(p => ({ position: put(p) })) }],
-      provenance: { software: 'superimposer example', operator: 'demo' },
+      provenance: { software: 'superimposer example' },
     };
   }
 

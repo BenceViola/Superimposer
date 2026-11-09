@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Superimposer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Procrustes superimposition, PCA and plots for landmark-json and TPS data, in the browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M6 24 13 6l13 9-9 12z' fill='none' stroke='%232346C4' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M9 19 19 7l6 12-11 7z' fill='none' stroke='%23FFC23D' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><h1>Superimposer</h1><span class="fmt">Procrustes · PCA · landmark-json and TPS</span></div>
+    <div class="grp">
+      <button class="btn primary" id="bOpen" type="button" title="Open .lmk.json, .tps or hand-in .zip files">Open files</button>
+      <button class="btn" id="bGroups" type="button" title="A CSV with a specimen column and one column per grouping" disabled>Add group table</button>
+      <button class="btn" id="bExample" type="button" title="Load invented fish data">Example data</button>
+    </div>
+    <div class="grp">
+      <button class="btn" id="bDownload" type="button" title="All result tables in one zip" disabled>Download results</button>
+      <button class="btn" id="bClear" type="button" disabled>Clear</button>
+    </div>
+    <input type="file" id="fData" accept=".json,.tps,.txt,.zip,application/json,application/zip,text/plain" multiple hidden>
+    <input type="file" id="fGroups" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
+  </header>
+
+  <main class="work">
+    <aside class="side" id="side" hidden>
+      <section class="card">
+        <h2>Data</h2>
+        <div id="summary"></div>
+      </section>
+
+      <div id="banners">
+        <section class="notice warn" id="tpsBanner" hidden>
+          <p><b>TPS files need checking.</b> <span id="tpsText"></span></p>
+          <button class="btn sm" id="bConfirmTps" type="button">Rows follow the template order</button>
+        </section>
+        <section class="notice warn" id="mirrorBanner" hidden>
+          <p><b id="mirrorCount"></b> <span id="mirrorList" class="mono"></span></p>
+          <button class="btn sm" id="bFlipAll" type="button">Flip them</button>
+        </section>
+        <section class="notice" id="flippedNote" hidden>
+          <p><span id="flippedText"></span></p>
+          <button class="btn sm" id="bUnflip" type="button">Undo flips</button>
+        </section>
+      </div>
+
+      <section class="card" id="issuesCard" hidden>
+        <h2>Notes</h2>
+        <ul id="issues" class="issues"></ul>
+      </section>
+
+      <section class="card">
+        <h2>Analysis</h2>
+        <label class="field">Missing landmarks
+          <select id="selMissing">
+            <option value="specimens">Leave out the specimen</option>
+            <option value="points">Leave out the landmark</option>
+          </select>
+        </label>
+        <label class="field">Replicates
+          <select id="selReplicates">
+            <option value="all">Keep all</option>
+            <option value="average">Average per specimen</option>
+          </select>
+        </label>
+        <label class="check" id="semiRow"><input type="checkbox" id="chkSemi"> Include semilandmarks (not slid)</label>
+        <h3>Display</h3>
+        <label class="field">Colour by
+          <select id="selColour"><option value="">Nothing</option></select>
+        </label>
+        <label class="check"><input type="checkbox" id="chkLabels" checked> Landmark labels</label>
+        <label class="check"><input type="checkbox" id="chkHulls"> Group outlines</label>
+        <label class="check"><input type="checkbox" id="chkEqual" checked> Equal PC axes</label>
+      </section>
+
+      <details class="card" open>
+        <summary><h2>Specimens</h2></summary>
+        <div class="tbl-wrap"><table id="tblSpecimens"></table></div>
+      </details>
+      <details class="card">
+        <summary><h2>Landmarks</h2></summary>
+        <div class="tbl-wrap"><table id="tblPoints"></table></div>
+      </details>
+    </aside>
+
+    <section class="stage">
+      <div id="empty" class="empty">
+        <h2>Compare shapes from your landmark files</h2>
+        <p>Drop <span class="mono">.lmk.json</span>, <span class="mono">.tps</span> or hand-in <span class="mono">.zip</span> files anywhere on this page. Everything runs in your browser; no data leave your computer.</p>
+        <div class="grp center">
+          <button class="btn primary" id="bOpen2" type="button">Open files</button>
+          <button class="btn" id="bExample2" type="button">Try the example data</button>
+        </div>
+      </div>
+
+      <div id="message" class="notice bad" hidden></div>
+
+      <div id="results" hidden>
+        <nav class="tabs" role="tablist">
+          <button role="tab" data-tab="super" class="tab on" type="button">Superimposition</button>
+          <button role="tab" data-tab="morpho" class="tab" type="button">Morphospace</button>
+          <button role="tab" data-tab="size" class="tab" type="button">Size</button>
+          <button role="tab" data-tab="repeat" class="tab" type="button">Repeatability</button>
+        </nav>
+
+        <div class="panel" data-panel="super">
+          <div class="plot-head">
+            <p class="hint" id="superHint"></p>
+            <div class="exports"><button class="btn sm" data-export="svg" data-plot="super" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="super" type="button">PNG</button></div>
+          </div>
+          <div class="plot" id="plotSuper"></div>
+        </div>
+
+        <div class="panel" data-panel="morpho" hidden>
+          <div class="morpho">
+            <div class="col">
+              <div class="plot-head">
+                <div class="ctrls">
+                  <label>X <select id="selPcX"></select></label>
+                  <label>Y <select id="selPcY"></select></label>
+                </div>
+                <div class="exports"><button class="btn sm" data-export="svg" data-plot="scatter" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="scatter" type="button">PNG</button></div>
+              </div>
+              <div class="plot" id="plotScatter"></div>
+              <p class="hint" id="selectionNote">Click a specimen to pick it out.</p>
+              <div class="plot-head">
+                <h3>Share of shape variance</h3>
+                <div class="exports"><button class="btn sm" data-export="svg" data-plot="scree" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="scree" type="button">PNG</button></div>
+              </div>
+              <div class="plot" id="plotScree"></div>
+            </div>
+            <div class="col">
+              <div class="plot-head">
+                <div class="ctrls"><label>Shape along <select id="selShapePc"></select></label></div>
+                <div class="exports"><button class="btn sm" data-export="svg" data-plot="shape" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="shape" type="button">PNG</button></div>
+              </div>
+              <div class="plot" id="plotShape"></div>
+              <label class="field slider">Position on the axis, from its lowest to its highest specimen
+                <input type="range" id="rngShape" min="-1" max="1" step="0.01" value="1">
+              </label>
+              <label class="field slider">Exaggerate the change <span class="mono" id="magValue">×1</span>
+                <input type="range" id="rngMag" min="1" max="5" step="0.5" value="1">
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" data-panel="size" hidden>
+          <div class="plot-head">
+            <div class="ctrls"><label>Against <select id="selSizePc"></select></label></div>
+            <div class="exports"><button class="btn sm" data-export="svg" data-plot="size" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="size" type="button">PNG</button></div>
+          </div>
+          <p class="notice warn" id="sizeWarn" hidden></p>
+          <div class="plot" id="plotSize"></div>
+        </div>
+
+        <div class="panel" data-panel="repeat" hidden>
+          <div class="plot-head">
+            <p class="hint" id="repeatHint"></p>
+            <div class="exports"><button class="btn sm" data-export="svg" data-plot="repeat" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="repeat" type="button">PNG</button></div>
+          </div>
+          <div class="plot" id="plotRepeat"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="tip" class="tip" hidden></div>
+  <div id="dropCue" class="drop-cue" hidden>Drop to add these files</div>
+</div>
+<script src="src/io.js"></script>
+<script src="src/gm.js"></script>
+<script src="src/exports.js"></script>
+<script src="src/plots.js"></script>
+<script src="src/example.js"></script>
+<script src="src/app.js"></script>
+</body>
+</html>
