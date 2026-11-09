@@ -181,9 +181,13 @@
       if (sel || (o.outliers && o.outliers[i])) labels.push([px, py, o.keys[i]]);
     });
     b += '</g>';
+    const taken = [];
     for (const [px, py, label] of labels) {
       const right = px < W - 90;
-      b += `<text class="pt-label" x="${f(px + (right ? 9 : -9))}" y="${f(py - 7)}" fill="${t.ink}" text-anchor="${right ? 'start' : 'end'}">${esc(label)}</text>`;
+      let ly = py - 7;
+      while (taken.some(([tx, ty]) => Math.abs(tx - px) < 90 && Math.abs(ty - ly) < 13)) ly -= 13;
+      taken.push([px, ly]);
+      b += `<text class="pt-label" x="${f(px + (right ? 9 : -9))}" y="${f(ly)}" fill="${t.ink}" text-anchor="${right ? 'start' : 'end'}">${esc(label)}</text>`;
     }
     for (const v of o.virtual || []) {
       const px = X(v.x), py = Y(v.y), c = 6;

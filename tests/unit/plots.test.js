@@ -473,3 +473,10 @@ test('shapeGrid passes on links, colours and warps', () => {
 test('shapeGrid with nothing selected is empty', () => {
   assert.equal(PL.shapeGrid({ items: [], mean: res.gpa.consensus, rows: res.prep.rows, theme: PL.THEMES.light }), '');
 });
+
+test('scatter: labels of neighbouring specimens do not sit on top of each other', () => {
+  const s = PL.scatter(Object.assign(base(), { x: [1, 1.01, 3, 4], y: [2, 2.01, 4, 3], selected: ['a', 'b'] }));
+  const ys = [...s.matchAll(/class="pt-label" x="[-\d.]+" y="([-\d.]+)"/g)].map(m => Number(m[1]));
+  assert.equal(ys.length, 2);
+  assert.ok(Math.abs(ys[0] - ys[1]) >= 12, String(ys));
+});

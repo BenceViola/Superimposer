@@ -262,7 +262,7 @@
         target = res.gpa.tangent[i];
         colour = paints[i];
       }
-      out.push({ target, colour, label: p.label, index, warp: useGrid() ? GM.tpsWarp(res.gpa.consensus, target) || undefined : undefined });
+      out.push({ target, colour, label: p.virtual ? p.label.replace(/PC\d+ /g, '').replace('Theoretical: ', 'Theoretical (') + ')' : p.label, index, warp: useGrid() ? GM.tpsWarp(res.gpa.consensus, target) || undefined : undefined });
     });
     return out;
   }
