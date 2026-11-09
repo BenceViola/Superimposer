@@ -24,9 +24,9 @@ const base = () => ({
   theme: PL.THEMES.light,
 });
 
-test('niceTicks gives round values that cover the range', () => {
+test('niceTicks gives round values inside the range', () => {
   const t = PL.niceTicks(0.013, 0.87, 5);
-  assert.ok(t[0] <= 0.1 && t[t.length - 1] >= 0.8);
+  assert.ok(t[0] >= 0.013 && t[0] <= 0.2 && t[t.length - 1] >= 0.8 && t[t.length - 1] <= 0.87, String(t));
   assert.ok(t.length >= 3 && t.length <= 11);
   assert.ok(t.every(v => Number(v.toPrecision(4)) === v));
 });
