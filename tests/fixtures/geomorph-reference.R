@@ -33,4 +33,22 @@ out$tps <- list(
   source = source_shape, target = target_shape, query = query,
   warped = geomorph:::tps2d(query, source_shape, target_shape)
 )
+# written at the end
+#write_json(out, "tests/fixtures/geomorph-reference.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
+
+# Missing landmarks: estimate.missing with both methods, on copies with a few landmarks removed.
+# Indices are 1-based here; the JSON stores them 0-based.
+holes <- function(file, gaps) {
+  A <- readland.tps(file, specID = "ID", warnmsg = FALSE)
+  for (g in gaps) A[g$lm, , g$spec] <- NA
+  list(
+    gaps = lapply(gaps, function(g) list(spec = g$spec - 1, lm = g$lm - 1)),
+    tps = lapply(gaps, function(g) unname(estimate.missing(A, method = "TPS")[, , g$spec])),
+    reg = lapply(gaps, function(g) unname(estimate.missing(A, method = "Reg")[, , g$spec]))
+  )
+}
+out$missing <- list(
+  two = holes("tests/fixtures/synthetic-2d.tps", list(list(spec = 4, lm = 3), list(spec = 8, lm = c(6, 10)), list(spec = 13, lm = 1))),
+  three = holes("tests/fixtures/synthetic-3d.tps", list(list(spec = 3, lm = 5), list(spec = 11, lm = c(2, 8))))
+)
 write_json(out, "tests/fixtures/geomorph-reference.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
