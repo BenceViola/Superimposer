@@ -251,3 +251,43 @@ test('renameColumn refuses blank and taken names, and the id column', () => {
 test('renaming to the same name changes nothing', () => {
   assert.deepEqual(TB.renameColumn(table(), 'site', 'site'), table());
 });
+
+/* ---------- selecting rows ---------- */
+const ORDER = ['a', 'b', 'c', 'd', 'e'];
+const sel = (selected, anchor, key, mods) => {
+  const r = TB.clickSelect({ selected: new Set(selected), anchor }, ORDER, key, mods || {});
+  return [[...r.selected].sort(), r.anchor];
+};
+
+test('a plain click selects only that row and sets the anchor', () => {
+  assert.deepEqual(sel(['a', 'c'], 'a', 'd'), [['d'], 'd']);
+});
+
+test('shift selects from the anchor to the row, in either direction, keeping the anchor', () => {
+  assert.deepEqual(sel(['b'], 'b', 'd', { shift: true }), [['b', 'c', 'd'], 'b']);
+  assert.deepEqual(sel(['d'], 'd', 'b', { shift: true }), [['b', 'c', 'd'], 'd']);
+});
+
+test('shift replaces what was selected before', () => {
+  assert.deepEqual(sel(['a', 'e'], 'c', 'd', { shift: true }), [['c', 'd'], 'c']);
+});
+
+test('shift without an anchor, or with one no longer shown, acts as a plain click', () => {
+  assert.deepEqual(sel([], null, 'c', { shift: true }), [['c'], 'c']);
+  assert.deepEqual(sel(['x'], 'x', 'c', { shift: true }), [['c'], 'c']);
+});
+
+test('toggle adds or removes one row and moves the anchor there', () => {
+  assert.deepEqual(sel(['a'], 'a', 'c', { toggle: true }), [['a', 'c'], 'c']);
+  assert.deepEqual(sel(['a', 'c'], 'a', 'c', { toggle: true }), [['a'], 'c']);
+});
+
+test('shift with toggle adds the range to the selection', () => {
+  assert.deepEqual(sel(['a', 'c'], 'c', 'e', { shift: true, toggle: true }), [['a', 'c', 'd', 'e'], 'c']);
+});
+
+test('clickSelect leaves the given set alone', () => {
+  const s = new Set(['a']);
+  TB.clickSelect({ selected: s, anchor: 'a' }, ORDER, 'c', {});
+  assert.deepEqual([...s], ['a']);
+});
