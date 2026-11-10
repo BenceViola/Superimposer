@@ -224,3 +224,30 @@ test('coordinate columns can skip points, keeping each point’s own values', ()
   const parsed = IO.parseTable(TB.tableCSV(TB.buildRows(d, null, null, new Set()), [], chosen, { coords: true }));
   assert.equal(parsed.rows[0].LM04_x, '40');
 });
+
+/* ---------- renaming columns ---------- */
+test('renameColumn keeps the position and the values', () => {
+  const b = TB.renameColumn(IO.parseTable('specimen_id,site,sex\nA,N,F\nB,S,M\n'), 'site', 'locality');
+  assert.deepEqual(b.columns, ['specimen_id', 'locality', 'sex']);
+  assert.deepEqual(b.rows.map(r => r.locality), ['N', 'S']);
+  assert.ok(b.rows.every(r => !('site' in r)));
+});
+
+test('renameColumn trims the new name and leaves the given table alone', () => {
+  const a = table(), b = TB.renameColumn(a, 'site', '  place ');
+  assert.deepEqual(b.columns, ['specimen_id', 'place']);
+  assert.deepEqual(a.columns, ['specimen_id', 'site']);
+});
+
+test('renameColumn refuses blank and taken names, and the id column', () => {
+  const two = IO.parseTable('specimen_id,site,sex\nA,N,F\n');
+  assert.equal(TB.renameColumn(two, 'site', ' '), null);
+  assert.equal(TB.renameColumn(two, 'site', 'sex'), null);
+  assert.equal(TB.renameColumn(two, 'site', 'specimen_id'), null);
+  assert.equal(TB.renameColumn(two, 'specimen_id', 'name'), null);
+  assert.equal(TB.renameColumn(two, 'nope', 'name'), null);
+});
+
+test('renaming to the same name changes nothing', () => {
+  assert.deepEqual(TB.renameColumn(table(), 'site', 'site'), table());
+});
