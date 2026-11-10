@@ -17,7 +17,7 @@
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
     colour: '', labels: true, hulls: false, equal: true,
     links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
-    dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, autoData: false,
+    dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, autoData: false,
     fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0,
     picked: [], analysisSig: '', shapeMode: 'axis', shapeStyle: 'arrows', styles: {}, styleKey: null,
     view: IDENTITY.map(r => r.slice()),
@@ -183,7 +183,7 @@
 
   function renderDataTable() {
     const active = document.activeElement;
-    const focus = active && active.classList && active.classList.contains('dt-cell') ? { key: active.dataset.key, col: active.dataset.col, at: active.selectionStart } : null;
+    const focus = focusOf(document.activeElement);
     const known = new Set(S.dataset.specimens.map(s => s.key));
     S.dtSelected = new Set([...S.dtSelected].filter(k => known.has(k)));
     const { all, rows } = visibleRows();
@@ -224,7 +224,11 @@
     $('dataTable').innerHTML = `<thead><tr><th class="fix f0"><input type="checkbox" id="dtSelectAll" ${allTicked ? 'checked' : ''} aria-label="Tick all rows shown"></th>`
       + '<th class="fix f1" title="Use in the analysis">Use</th><th class="fix f2"></th>'
       + `<th class="fix f3">${head('key', 'Specimen')}</th>`
-      + groups.map(g => `<th class="dt-group">${head(`group:${g}`, g)}<button type="button" class="x ${S.dtArmed === g ? 'armed' : ''}" data-remove="${esc(g)}" aria-label="Remove column ${esc(g)}">${S.dtArmed === g ? 'Remove?' : '×'}</button></th>`).join('')
+      + groups.map(g => (S.dtRenaming === g
+        ? `<th class="dt-group"><input class="dt-rename" data-col="${esc(g)}" value="${esc(g)}" aria-label="New name for column ${esc(g)}"></th>`
+        : `<th class="dt-group">${head(`group:${g}`, g)}`
+          + `<button type="button" class="x" data-rename="${esc(g)}" aria-label="Rename column ${esc(g)}" title="Rename">✎</button>`
+          + `<button type="button" class="x ${S.dtArmed === g ? 'armed' : ''}" data-remove="${esc(g)}" aria-label="Remove column ${esc(g)}">${S.dtArmed === g ? 'Remove?' : '×'}</button></th>`)).join('')
       + BASE.map(([c, l]) => `<th>${head(c, l)}</th>`).join('')
       + points.flatMap(p => axes.map(a => `<th>${esc(p.id)}_${a}</th>`)).join('')
       + `</tr></thead><tbody>${lines}</tbody>`;
@@ -235,7 +239,8 @@
       const levels = [...new Set(all.map(r => r.groups[g]).filter(Boolean))].sort();
       return `<datalist id="dl-${i}">${levels.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
     }).join('');
-    const bulk = $('dtBulkCol'), keep = bulk.value;
+    const bulk = $('dtBulkCol'), keep = bulk.dataset.want || bulk.value;
+    delete bulk.dataset.want;
     bulk.innerHTML = groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
     if (groups.includes(keep)) bulk.value = keep;
     const bulkLevels = [...new Set(all.map(r => r.groups[bulk.value]).filter(Boolean))].sort();
@@ -248,10 +253,76 @@
       ? 'Coordinates as imported: y points up, and scale applied. Red cells are missing, yellow ones estimated.'
       : 'Groups belong to the specimen ID, so replicates stay together. Type in a cell, paste from a spreadsheet, or tick rows and assign them.');
 
-    if (focus) {
-      const again = [...document.querySelectorAll('input.dt-cell')].find(i => i.dataset.key === focus.key && i.dataset.col === focus.col);
-      if (again) { again.focus(); if (focus.at != null) again.setSelectionRange(focus.at, focus.at); }
+    const renameBox = document.querySelector('#dataTable input.dt-rename');
+    if (renameBox) { if (document.activeElement !== renameBox) { renameBox.focus(); renameBox.select(); } }
+    else if (focus) restoreFocus(focus);
+  }
+
+  /* Keyboard movement: every row has the same items, in order: tick box, Use box, marker, group cells. */
+  const NAV = 'input.dt-select, input.dt-use, button.mk, input.dt-cell';
+  const kindOf = el => ['dt-select', 'dt-use', 'mk', 'dt-cell'].find(c => el.classList.contains(c));
+  /** Enough to find the same item again after the table is redrawn. */
+  function focusOf(el) {
+    if (!el || !el.matches || !el.matches(NAV) || !el.closest('#dataTable')) return null;
+    const out = { key: el.closest('tr').dataset.key, kind: kindOf(el), col: el.dataset.col };
+    if (out.kind === 'dt-cell') Object.assign(out, { from: el.selectionStart, to: el.selectionEnd });
+    return out;
+  }
+  function restoreFocus(f) {
+    const row = [...$('dataTable').tBodies[0].rows].find(r => r.dataset.key === f.key);
+    const el = row && [...row.querySelectorAll(NAV)].find(x => kindOf(x) === f.kind && x.dataset.col === f.col);
+    if (!el) return;
+    el.focus();
+    if (f.kind === 'dt-cell' && f.from != null) el.setSelectionRange(f.from, f.to);
+  }
+  /** A text cell lets the arrow leave when all of it is selected, or the caret is at that end. */
+  function mayLeave(el, left) {
+    if (kindOf(el) !== 'dt-cell') return true;
+    const s = el.selectionStart, e = el.selectionEnd, n = el.value.length;
+    if (s === 0 && e === n) return true;
+    return left ? s === 0 && e === 0 : s === n && e === n;
+  }
+  function moveFocus(e) {
+    const t = e.target, row = t.closest('tbody tr');
+    if (!row || !t.matches(NAV)) return;
+    const items = [...row.querySelectorAll(NAV)], i = items.indexOf(t);
+    let next = null;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const other = e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling;
+      next = other && other.querySelectorAll(NAV)[i];
+    } else if (mayLeave(t, e.key === 'ArrowLeft')) {
+      next = items[i + (e.key === 'ArrowLeft' ? -1 : 1)];
+    } else return;
+    e.preventDefault();
+    if (!next) return;
+    next.focus();
+    if (kindOf(next) === 'dt-cell') next.select();
+  }
+
+  function startRename(col) {
+    S.dtRenaming = col;
+    S.dtArmed = null;
+    S.dtMessage = '';
+    renderDataTable();
+  }
+  function finishRename(box, keep) {
+    // Redrawing removes the box, and some browsers then report it losing focus: ignore that.
+    if (S.dtRenaming === null || box.dataset.col !== S.dtRenaming || !box.isConnected) return;
+    const from = S.dtRenaming;
+    if (!keep) { S.dtRenaming = null; S.dtMessage = ''; renderDataTable(); return; }
+    const next = TB.renameColumn(S.table, from, box.value);
+    if (!next) {
+      const name = box.value.trim();
+      S.dtMessage = name ? `There is already a column called “${name}”. Choose another name, or press Escape.` : 'A column needs a name. Type one, or press Escape.';
+      renderDataTable();
+      return;
     }
+    const to = box.value.trim();
+    S.dtRenaming = null;
+    if (S.colour === `csv:${from}`) S.colour = `csv:${to}`;
+    if (S.dtSort && S.dtSort.col === `group:${from}`) S.dtSort = { col: `group:${to}`, dir: S.dtSort.dir };
+    if ($('dtBulkCol').value === from) $('dtBulkCol').dataset.want = to;
+    editGroups(next);
   }
 
   /** The records sharing these rows' specimen IDs, as a group value belongs to the ID. */
@@ -549,7 +620,7 @@
   }
 
   function clearAll(draw) {
-    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dtFilter: '', dtSort: null, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, autoData: false, dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
+    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dtFilter: '', dtSort: null, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, autoData: false, dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
     S.flip = new Set(); S.excludeSpecimens = new Set(); S.excludePoints = new Set();
     closeStylePop();
     $('dtFilter').value = '';
@@ -655,6 +726,8 @@
       renderDataTable();
       return;
     }
+    const ren = e.target.closest('[data-rename]');
+    if (ren) { startRename(ren.dataset.rename); return; }
     const remove = e.target.closest('[data-remove]');
     if (!remove) return;
     const col = remove.dataset.remove;
@@ -681,11 +754,21 @@
     }
   });
   on($('dataTable'), 'keydown', e => {
-    if (e.key !== 'Enter' || !e.target.classList.contains('dt-cell')) return;
+    const t = e.target;
+    if (t.classList.contains('dt-rename')) {
+      if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); finishRename(t, e.key === 'Enter'); }
+      return;
+    }
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) { moveFocus(e); return; }
+    if (e.key === 'Escape' && t.classList.contains('dt-cell')) { t.value = t.defaultValue; t.select(); e.stopPropagation(); return; }
+    if (e.key !== 'Enter' || !t.classList.contains('dt-cell')) return;
     e.preventDefault();
     const column = [...document.querySelectorAll('input.dt-cell')].filter(i => i.dataset.col === e.target.dataset.col);
     const next = column[column.indexOf(e.target) + 1];
     if (next) next.focus(); else e.target.blur();
+  });
+  on($('dataTable'), 'focusout', e => {
+    if (e.target.classList.contains('dt-rename')) finishRename(e.target, true);
   });
   on($('dataTable'), 'paste', e => {
     const t = e.target;

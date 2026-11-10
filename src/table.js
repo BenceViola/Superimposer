@@ -21,6 +21,18 @@
     return out;
   }
 
+  /** Returns the new table, or null if the new name is blank or taken, or the column is the id column or absent. */
+  function renameColumn(table, from, to) {
+    const clean = String(to || '').trim();
+    if (!clean || from === idColumn(table) || !table.columns.includes(from)) return null;
+    if (clean === from) return copyTable(table);
+    if (table.columns.includes(clean)) return null;
+    const out = copyTable(table);
+    out.columns = out.columns.map(c => (c === from ? clean : c));
+    out.rows = out.rows.map(r => Object.fromEntries(out.columns.map(c => [c, c === clean ? r[from] : r[c]])));
+    return out;
+  }
+
   function removeColumn(table, name) {
     const out = copyTable(table);
     out.columns = out.columns.filter(c => c !== name);
@@ -119,5 +131,5 @@
     ]));
   }
 
-  return { emptyTable, idColumn, addColumn, removeColumn, setCells, groupsCSV, parsePaste, buildRows, sortRows, filterRows, tableCSV };
+  return { emptyTable, idColumn, addColumn, renameColumn, removeColumn, setCells, groupsCSV, parsePaste, buildRows, sortRows, filterRows, tableCSV };
 }));
