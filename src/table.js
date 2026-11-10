@@ -93,6 +93,26 @@
     });
   }
 
+  /**
+   * Selecting rows as in a spreadsheet. state: { selected: Set of keys, anchor }; order: keys as shown.
+   * Plain click: only this row. shift: from the anchor to here. toggle (Ctrl/Cmd): add or remove one row.
+   * shift + toggle: add the range. Returns a new state.
+   */
+  function clickSelect(state, order, key, mods) {
+    const selected = new Set(state.selected);
+    const from = order.indexOf(state.anchor), to = order.indexOf(key);
+    if (mods.shift && from >= 0 && to >= 0) {
+      if (!mods.toggle) selected.clear();
+      for (let i = Math.min(from, to); i <= Math.max(from, to); i++) selected.add(order[i]);
+      return { selected, anchor: state.anchor };
+    }
+    if (mods.toggle) {
+      if (selected.has(key)) selected.delete(key); else selected.add(key);
+      return { selected, anchor: key };
+    }
+    return { selected: new Set([key]), anchor: key };
+  }
+
   const valueOf = (row, col) => (col.startsWith('group:') ? row.groups[col.slice(6)] : row[col]);
   const blank = v => v == null || v === '';
   const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -131,5 +151,5 @@
     ]));
   }
 
-  return { emptyTable, idColumn, addColumn, renameColumn, removeColumn, setCells, groupsCSV, parsePaste, buildRows, sortRows, filterRows, tableCSV };
+  return { clickSelect, emptyTable, idColumn, addColumn, renameColumn, removeColumn, setCells, groupsCSV, parsePaste, buildRows, sortRows, filterRows, tableCSV };
 }));

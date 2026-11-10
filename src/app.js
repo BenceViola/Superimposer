@@ -17,7 +17,7 @@
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
     colour: '', labels: true, hulls: false, equal: true,
     links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
-    dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, autoData: false,
+    dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false,
     fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0,
     picked: [], analysisSig: '', shapeMode: 'axis', shapeStyle: 'arrows', styles: {}, styleKey: null,
     view: IDENTITY.map(r => r.slice()),
@@ -251,7 +251,8 @@
     $('dtCount').textContent = `${rows.length} of ${plural(all.length, 'record')}${S.dtSelected.size ? ` · ${S.dtSelected.size} selected` : ''}`;
     $('dtHint').textContent = S.dtMessage || (S.dtCoords
       ? 'Coordinates as imported: y points up, and scale applied. Red cells are missing, yellow ones estimated.'
-      : 'Groups belong to the specimen ID, so replicates stay together. Type in a cell, paste from a spreadsheet, or tick rows and assign them.');
+      : 'Click rows to select them (Shift for a range, Ctrl or ⌘ for single rows), then assign a group, or type in a cell and press Ctrl or ⌘ + Enter to fill all selected rows. Groups belong to the specimen ID, so replicates stay together.');
+    $('bClearSel').hidden = !S.dtSelected.size;
 
     const renameBox = document.querySelector('#dataTable input.dt-rename');
     if (renameBox) { if (document.activeElement !== renameBox) { renameBox.focus(); renameBox.select(); } }
@@ -275,6 +276,14 @@
     el.focus();
     if (f.kind === 'dt-cell' && f.from != null) el.setSelectionRange(f.from, f.to);
   }
+  /** Select rows from a click or a key. */
+  function selectRows(key, mods) {
+    const next = TB.clickSelect({ selected: S.dtSelected, anchor: S.dtAnchor }, S.dtRows.map(r => r.key), key, mods);
+    S.dtSelected = next.selected;
+    S.dtAnchor = next.anchor;
+    renderDataTable();
+  }
+
   /** A text cell lets the arrow leave when all of it is selected, or the caret is at that end. */
   function mayLeave(el, left) {
     if (kindOf(el) !== 'dt-cell') return true;
@@ -290,7 +299,18 @@
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       const other = e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling;
       next = other && other.querySelectorAll(NAV)[i];
-    } else if (mayLeave(t, e.key === 'ArrowLeft')) {
+      if (e.shiftKey) {
+        e.preventDefault();
+        if (!next) return;
+        if (!S.dtAnchor || !S.dtSelected.has(S.dtAnchor)) S.dtAnchor = row.dataset.key;
+        const f = focusOf(next);
+        selectRows(other.dataset.key, { shift: true });
+        restoreFocus(f);
+        if (document.activeElement && kindOf(document.activeElement) === 'dt-cell') document.activeElement.select();
+        return;
+      }
+    } else if (e.shiftKey) return;
+    else if (mayLeave(t, e.key === 'ArrowLeft')) {
       next = items[i + (e.key === 'ArrowLeft' ? -1 : 1)];
     } else return;
     e.preventDefault();
@@ -620,7 +640,7 @@
   }
 
   function clearAll(draw) {
-    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dtFilter: '', dtSort: null, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, autoData: false, dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
+    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dtFilter: '', dtSort: null, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false, dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
     S.flip = new Set(); S.excludeSpecimens = new Set(); S.excludePoints = new Set();
     closeStylePop();
     $('dtFilter').value = '';
@@ -726,6 +746,14 @@
       renderDataTable();
       return;
     }
+    const tickBox = e.target.closest('input.dt-select');
+    const row = e.target.closest('tbody tr');
+    if (tickBox || (row && !e.target.closest('input, button, select, a, label'))) {
+      const f = tickBox ? focusOf(tickBox) : null;
+      selectRows(row.dataset.key, { shift: e.shiftKey, toggle: !!tickBox || e.ctrlKey || e.metaKey });
+      if (f) restoreFocus(f);
+      return;
+    }
     const ren = e.target.closest('[data-rename]');
     if (ren) { startRename(ren.dataset.rename); return; }
     const remove = e.target.closest('[data-remove]');
@@ -741,10 +769,6 @@
     if (t.id === 'dtSelectAll') {
       for (const r of S.dtRows) { if (t.checked) S.dtSelected.add(r.key); else S.dtSelected.delete(r.key); }
       renderDataTable();
-    } else if (t.classList.contains('dt-select')) {
-      const key = t.closest('tr').dataset.key;
-      if (t.checked) S.dtSelected.add(key); else S.dtSelected.delete(key);
-      renderDataTable();
     } else if (t.classList.contains('dt-use')) {
       const key = t.closest('tr').dataset.key;
       if (t.checked) S.excludeSpecimens.delete(key); else S.excludeSpecimens.add(key);
@@ -759,7 +783,23 @@
       if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); finishRename(t, e.key === 'Enter'); }
       return;
     }
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) { moveFocus(e); return; }
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey) { moveFocus(e); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !t.classList.contains('dt-cell') && t.closest('tbody')) {
+      e.preventDefault();
+      S.dtSelected = new Set(S.dtRows.map(r => r.key));
+      const f = focusOf(t);
+      renderDataTable();
+      if (f) restoreFocus(f);
+      return;
+    }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && t.classList.contains('dt-cell')) {
+      e.preventDefault();
+      const key = t.dataset.key;
+      const rows = S.dtSelected.has(key) ? [...S.dtSelected] : [key];
+      t.defaultValue = t.value; // so the change on leaving the cell doesn't apply it again
+      editGroups(TB.setCells(S.table, recordsOf(rows), t.dataset.col, t.value));
+      return;
+    }
     if (e.key === 'Escape' && t.classList.contains('dt-cell')) { t.value = t.defaultValue; t.select(); e.stopPropagation(); return; }
     if (e.key !== 'Enter' || !t.classList.contains('dt-cell')) return;
     e.preventDefault();
@@ -767,6 +807,11 @@
     const next = column[column.indexOf(e.target) + 1];
     if (next) next.focus(); else e.target.blur();
   });
+  // Shift-click would otherwise select the text between the two rows.
+  on($('dataTable'), 'mousedown', e => {
+    if (e.shiftKey && e.target.closest('tbody tr') && !e.target.closest('input.dt-cell')) e.preventDefault();
+  });
+  on($('bClearSel'), 'click', () => { S.dtSelected = new Set(); S.dtAnchor = null; renderDataTable(); });
   on($('dataTable'), 'focusout', e => {
     if (e.target.classList.contains('dt-rename')) finishRename(e.target, true);
   });

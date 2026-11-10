@@ -12,7 +12,7 @@ A small browser tool for basic geometric morphometrics, made to go with [Landmar
 - **Shows individual specimens** picked in the morphospace, up to four side by side over the mean. A click on empty space gives the theoretical shape at that position.
 - **Deformation grids** (thin-plate spline, 2D) as an alternative to arrows.
 - **Specimen markers:** colour and marker follow the group, and can be changed for any specimen from the specimen list.
-- **Data table:** every record with its details, editable group columns (type, paste from a spreadsheet, or assign ticked rows; rename or remove columns), and the coordinates with gaps marked. Arrow keys move between cells as in a spreadsheet.
+- **Data table:** every record with its details, editable group columns (type, paste from a spreadsheet, or assign ticked rows; rename or remove columns), and the coordinates with gaps marked. Arrow keys move between cells, and rows are selected as in a spreadsheet (Shift-click for a range, Ctrl/⌘-click for single rows); Ctrl/⌘ + Enter fills a value into every selected row.
 - **Draws links** between landmarks, by clicking them or as an automatic outline or triangulation (2D). They show on every shape figure, and can be saved as a CSV to reuse or hand out.
 - **Checks** for mirrored specimens (offers to flip them), outliers, mixed units and files that don't fit the rest.
 - **Exports** scores, aligned coordinates, consensus, eigenvalues and loadings as CSV, and figures as SVG or PNG.

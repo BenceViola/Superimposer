@@ -95,6 +95,7 @@ details.card[open] summary{margin-bottom:6px}
 #dataTable .f2{left:66px;width:26px;padding-inline:3px}
 #dataTable .f3{left:92px;min-width:110px;border-right:1px solid var(--line);font-family:var(--f-mono);font-size:11.5px}
 #dataTable tr.ticked td{background:var(--accent-soft)}
+#dataTable tbody td:not(.g){cursor:default;user-select:none;-webkit-user-select:none}
 #dataTable tr.left-out td:not(.fix){color:var(--muted)}
 #dataTable th button{all:unset;cursor:pointer;font-weight:600}
 #dataTable th button:focus-visible{outline:2px solid var(--accent)}
