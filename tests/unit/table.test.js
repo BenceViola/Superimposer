@@ -291,3 +291,16 @@ test('clickSelect leaves the given set alone', () => {
   TB.clickSelect({ selected: s, anchor: 'a' }, ORDER, 'c', {});
   assert.deepEqual([...s], ['a']);
 });
+
+test('rows: imputed landmarks are counted and their values offered', () => {
+  const doc = doc2d('G', pts(), { template: t });
+  doc.landmarks[1] = { id: 'LM02', template_id: 'LM02', status: 'missing', position: null };
+  const d = data(rec('A'), rec('B'), rec('C'), rec('D'), IO.parseLmk(doc, 'g').specimens[0]);
+  const res = GM.analyse(d, { impute: { method: 'mean' } });
+  const row = TB.buildRows(d, res, null, new Set()).find(x => x.key === 'G');
+  assert.equal(row.imputed, 1);
+  assert.deepEqual(Object.keys(row.imputedAt), ['1']);
+  assert.equal(row.imputedAt[1].method, 'mean');
+  assert.equal(row.imputedAt[1].coords.length, 2);
+  assert.equal(TB.buildRows(d, res, null, new Set())[0].imputed, 0);
+});

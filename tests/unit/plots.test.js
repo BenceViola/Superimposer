@@ -480,3 +480,21 @@ test('scatter: labels of neighbouring specimens do not sit on top of each other'
   assert.equal(ys.length, 2);
   assert.ok(Math.abs(ys[0] - ys[1]) >= 12, String(ys));
 });
+
+/* ---------- imputed landmarks ---------- */
+test('imputed landmarks are ringed in the raw view and the superimposition, with a legend entry', () => {
+  for (const s of [PL.rawData(raw({ imputed: [[0, 1], [2, 3]] })), PL.superimposition(sup({ imputed: [[0, 1], [2, 3]] }))]) {
+    wellFormed(s);
+    assert.equal(count(s, /class="imputed"/g), 2);
+    assert.match(s, /Imputed landmark/);
+  }
+  assert.equal(count(PL.superimposition(sup()), /class="imputed"/g), 0);
+  assert.doesNotMatch(PL.superimposition(sup()), /Imputed landmark/);
+});
+
+test('scatter: specimens with imputed landmarks get a dashed ring and a legend entry', () => {
+  const s = PL.scatter(Object.assign(base(), { rings: [false, true, false, true] }));
+  wellFormed(s);
+  assert.equal(count(s, /class="imputed-ring"/g), 2);
+  assert.match(s, /Has imputed landmarks/);
+});

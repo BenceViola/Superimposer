@@ -176,3 +176,20 @@ test('a file whose template is only a reference still loads, with a warning', ()
   assert.deepEqual(r.specimens[0].rows.map(x => x.id), ['LM01', 'LM02', 'LM03']);
   assert.match(r.warnings[0], /template/i);
 });
+
+test('bilateral pairs from the template are kept on the rows', () => {
+  const t = tpl2d({ landmarks: [{ id: 'LM01', name: 'a' }, { id: 'LM02', name: 'L', bilateral_pair: 'LM03' }, { id: 'LM03', name: 'R', bilateral_pair: 'LM02' }] });
+  const s = IO.parseLmk(doc2d('A', [[1, 1], [2, 2], [3, 3]], { template: t }), 'a').specimens[0];
+  assert.deepEqual(s.rows.map(r => r.pair), ['', 'LM03', 'LM02']);
+});
+
+test('a pair naming a landmark not in the template is ignored', () => {
+  const t = tpl2d({ landmarks: [{ id: 'LM01', name: 'a', bilateral_pair: 'LM99' }, { id: 'LM02', name: 'b' }, { id: 'LM03', name: 'c' }] });
+  const s = IO.parseLmk(doc2d('A', [[1, 1], [2, 2], [3, 3]], { template: t }), 'a').specimens[0];
+  assert.equal(s.rows[0].pair, '');
+});
+
+test('templatePairs lists each pair once', () => {
+  const rows = [{ id: 'A', pair: '' }, { id: 'L', pair: 'R' }, { id: 'R', pair: 'L' }, { id: 'L2', pair: 'R2' }, { id: 'R2', pair: 'L2' }];
+  assert.deepEqual(IO.templatePairs(rows), [['L', 'R'], ['L2', 'R2']]);
+});
