@@ -17,7 +17,7 @@
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
     colour: '', labels: true, hulls: false, equal: true,
     links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
-    dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false,
+    dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false, sideSort: null,
     fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0,
     picked: [], analysisSig: '', shapeMode: 'axis', shapeStyle: 'arrows', styles: {}, styleKey: null,
     view: IDENTITY.map(r => r.slice()),
@@ -432,9 +432,20 @@
     const ok = res && res.ok && S.fitted;
     const tableStyles = PL.resolveStyles(d.specimens.map(s => s.key), currentGroups(options, d.specimens), S.styles);
     const pickedSet = new Set(S.picked.map(p => p.key));
-    $('tblSpecimens').innerHTML = '<thead><tr><th></th><th></th><th>Specimen</th><th class="num" title="Procrustes distance to the consensus">Dist.</th></tr></thead><tbody>' + d.specimens.map((s, row) => {
-      const off = S.excludeSpecimens.has(s.key);
+    // Sorted on request (distance: largest first); blanks stay last. The data table keeps its own order.
+    const listed = d.specimens.map((s, row) => {
       const i = inPrep.get(s.key);
+      return { s, row, i, key: s.key, dist: ok && i != null && !S.excludeSpecimens.has(s.key) ? res.gpa.procD[i] : null };
+    });
+    const order = S.sideSort ? TB.sortRows(listed, S.sideSort.col, S.sideSort.dir) : listed;
+    const sortHead = (col, label, title) => {
+      const on = S.sideSort && S.sideSort.col === col;
+      const mark = on ? (S.sideSort.dir > 0 ? '▲' : '▼') : '⇅';
+      return `<button type="button" class="sort ${on ? 'on' : ''}" data-sort="${col}" title="${esc(title)}">${label} <span aria-hidden="true">${mark}</span></button>`;
+    };
+    const distTitle = ok ? 'Sort by Procrustes distance to the consensus' : 'Distances appear after the Procrustes fit';
+    $('tblSpecimens').innerHTML = `<thead><tr><th></th><th></th><th>${sortHead('key', 'Specimen', 'Sort by name')}</th><th class="num">${sortHead('dist', 'Dist.', distTitle)}</th></tr></thead><tbody>` + order.map(({ s, row, i }) => {
+      const off = S.excludeSpecimens.has(s.key);
       const why = off ? '' : droppedBy.get(s.key) || (i == null && S.replicates === 'average' ? 'averaged' : '');
       const dist = ok && i != null ? res.gpa.procD[i].toFixed(4) : '';
       const flag = ok && i != null && res.outliers[i];
@@ -640,7 +651,7 @@
   }
 
   function clearAll(draw) {
-    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dtFilter: '', dtSort: null, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false, dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
+    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dtFilter: '', dtSort: null, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false, sideSort: null, dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
     S.flip = new Set(); S.excludeSpecimens = new Set(); S.excludePoints = new Set();
     closeStylePop();
     $('dtFilter').value = '';
@@ -892,6 +903,13 @@
     rerun();
   });
   on($('tblSpecimens'), 'click', e => {
+    const sort = e.target.closest('[data-sort]');
+    if (sort) {
+      const col = sort.dataset.sort, first = col === 'dist' ? -1 : 1;
+      S.sideSort = { col, dir: S.sideSort && S.sideSort.col === col ? -S.sideSort.dir : first };
+      render();
+      return;
+    }
     const tr = e.target.closest('tr[data-key]');
     if (!tr) return;
     const mark = e.target.closest('.mk');

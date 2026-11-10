@@ -55,7 +55,9 @@ test('the sort stays when the analysis changes', async ({ page }) => {
   await openApp(page);
   await loadExample(page);
   await sortBy(page, 'dist');
-  await page.locator('#tblSpecimens tbody tr').nth(3).locator('input[type=checkbox]').uncheck();
+  const fourth = (await keys(page))[3];
+  await page.locator(`#tblSpecimens tr[data-key="${fourth}"] input[type=checkbox]`).uncheck();
+  expect((await keys(page)).slice(-1)).toEqual([fourth]);
   const d = await dists(page);
   expect(d).toEqual([...d].sort((a, b) => b - a));
 });
@@ -65,7 +67,7 @@ test('ticks and markers still act on the right specimen when sorted', async ({ p
   await loadExample(page);
   await sortBy(page, 'dist');
   const first = (await keys(page))[0];
-  await page.locator('#tblSpecimens tbody tr').first().locator('input[type=checkbox]').uncheck();
+  await page.locator(`#tblSpecimens tr[data-key="${first}"] input[type=checkbox]`).uncheck();
   expect(await page.evaluate(k => window.__sup.S.excludeSpecimens.has(k), first)).toBe(true);
   await page.locator(`#tblSpecimens tr[data-key="${first}"] .mk`).click();
   await expect(page.locator('#popKey')).toContainText(first);

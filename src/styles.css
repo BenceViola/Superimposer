@@ -127,6 +127,11 @@ details.card[open] summary{margin-bottom:6px}
 .tbl-wrap{max-height:280px;overflow-y:auto}
 table{border-collapse:collapse;width:100%;font-size:12px}
 th{position:sticky;top:0;background:var(--panel);text-align:left;font-weight:600;color:var(--muted);padding:3px 4px;border-bottom:1px solid var(--line)}
+.side th button.sort{all:unset;cursor:pointer;font:inherit;color:inherit;white-space:nowrap}
+.side th button.sort span{opacity:.55;font-size:10px}
+.side th button.sort.on{color:var(--ink)}
+.side th button.sort.on span{opacity:1}
+.side th button.sort:focus-visible{outline:2px solid var(--accent)}
 th.num,td.num{text-align:right;font-family:var(--f-mono);font-size:11.5px;white-space:nowrap}
 td{padding:2px 4px;border-bottom:1px solid var(--line);vertical-align:top}
 td.id{font-family:var(--f-mono);font-size:11.5px;word-break:break-all;cursor:pointer}
