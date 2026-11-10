@@ -214,24 +214,185 @@
     return M.map((row, i) => row.slice(n).map(v => v / row[i]));
   }
 
-  /** The 2D thin-plate spline taking source onto target, as a function of a point; null if the landmarks can't define one. */
+  /**
+   * The thin-plate spline taking source onto target, as a function of a point, in 2D or 3D
+   * (kernel r² log r² in 2D, r in 3D, as geomorph's tps2d3d); null if the landmarks can't define one.
+   */
   function tpsWarp(source, target) {
-    const n = source.length;
-    const U = (a, b) => { const r2 = (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2; return r2 > 0 ? r2 * Math.log(r2) : 0; };
-    const L = Array.from({ length: n + 3 }, () => new Array(n + 3).fill(0));
+    const n = source.length, k = source[0].length;
+    const U = (a, b) => {
+      let r2 = 0;
+      for (let d = 0; d < k; d++) r2 += (a[d] - b[d]) ** 2;
+      if (!(r2 > 0)) return 0;
+      return k === 2 ? r2 * Math.log(r2) : Math.sqrt(r2);
+    };
+    const L = Array.from({ length: n + k + 1 }, () => new Array(n + k + 1).fill(0));
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) L[i][j] = U(source[i], source[j]);
-      const q = [1, source[i][0], source[i][1]];
-      for (let k = 0; k < 3; k++) { L[i][n + k] = q[k]; L[n + k][i] = q[k]; }
+      const q = [1, ...source[i]];
+      for (let c = 0; c <= k; c++) { L[i][n + c] = q[c]; L[n + c][i] = q[c]; }
     }
-    const rhs = [...target.map(p => [p[0], p[1]]), [0, 0], [0, 0], [0, 0]];
+    const rhs = [...target.map(p => p.slice(0, k)), ...Array.from({ length: k + 1 }, () => new Array(k).fill(0))];
     const coef = solve(L, rhs);
     if (!coef) return null;
-    return p => [0, 1].map(d => {
-      let v = coef[n][d] + coef[n + 1][d] * p[0] + coef[n + 2][d] * p[1];
+    return p => Array.from({ length: k }, (_, d) => {
+      let v = coef[n][d];
+      for (let c = 0; c < k; c++) v += coef[n + 1 + c][d] * p[c];
       for (let i = 0; i < n; i++) v += coef[i][d] * U(p, source[i]);
       return v;
     });
+  }
+
+  /* ---------- missing landmarks ---------- */
+  const centroidOf = pts => pts[0].map((_, d) => pts.reduce((s, p) => s + p[d], 0) / pts.length);
+  const minus = (p, c) => p.map((v, d) => v - c[d]);
+  const plus = (p, c) => p.map((v, d) => v + c[d]);
+
+  /** For centred point sets: the rotation (never a reflection) taking from onto to, as a function of a point. */
+  function fitRigid(from, to) {
+    const R = bestRotation(to, from);
+    return p => R.map(r => r.reduce((s, v, i) => s + v * p[i], 0));
+  }
+  const transpose = R => R[0].map((_, j) => R.map(r => r[j]));
+  const rotate = (R, p) => R.map(r => r.reduce((s, v, i) => s + v * p[i], 0));
+
+  /** Mirror image of the specimen about its own midline, fitted onto it; fills the gaps whose partner is present. */
+  function mirrorFill(c, partner, todo) {
+    const flip = q => [-q[0], ...q.slice(1)];
+    const fit = c.map((q, j) => j).filter(j => c[j] && c[partner[j]]);
+    if (fit.length < 3 || !fit.some(j => partner[j] !== j)) return { got: [], reason: 'too few landmarks on both sides to fit its mirror image' };
+    const from = fit.map(j => flip(c[partner[j]])), to = fit.map(j => c[j]);
+    const cf = centroidOf(from), ct = centroidOf(to);
+    const turn = fitRigid(from.map(q => minus(q, cf)), to.map(q => minus(q, ct)));
+    const got = [];
+    for (const j of todo) {
+      if (c[j] || !c[partner[j]]) continue;
+      c[j] = plus(turn(minus(flip(c[partner[j]]), cf)), ct);
+      got.push(j);
+    }
+    return { got };
+  }
+
+  /** The reference for thin-plate spline, regression and mean: complete specimens, aligned with their size kept, as geomorph's estimate.missing. */
+  function buildReference(configs) {
+    const g = gpa(configs);
+    const sized = g.aligned.map((c, i) => scaled(c, g.csize[i]));
+    return { mean: meanOf(sized), sized };
+  }
+
+  function fromReference(method, c, left, R, opts) {
+    const k = c.find(Boolean).length;
+    const present = c.map((q, j) => j).filter(j => c[j]);
+    const mean = present.map(j => R.mean[j]), have = present.map(j => c[j]);
+    if (method === 'tps') {
+      const warp = tpsWarp(mean, have);
+      if (!warp) return { reason: 'its remaining landmarks can’t define a thin-plate spline' };
+      for (const j of left) c[j] = warp(R.mean[j]);
+      return {};
+    }
+    const cm = centroidOf(mean), ch = centroidOf(have);
+    const m0 = mean.map(q => minus(q, cm)), h0 = have.map(q => minus(q, ch));
+    if (method === 'mean') {
+      // The mean shape, moved, turned and sized onto the specimen's own landmarks.
+      const Rot = bestRotation(h0, m0);
+      const turned = m0.map(q => rotate(Rot, q));
+      const s = turned.reduce((a, q, i) => a + q.reduce((b, v, d) => b + v * h0[i][d], 0), 0) / m0.reduce((a, q) => a + q.reduce((b, v) => b + v * v, 0), 0);
+      for (const j of left) c[j] = plus(rotate(Rot, minus(R.mean[j], cm)).map(v => v * s), ch);
+      return {};
+    }
+    // Regression (as geomorph's "Reg"): two-block partial least squares between the present and the
+    // missing coordinates of the complete specimens, then a regression of one block's scores on the other's.
+    const Rot = bestRotation(m0, h0);
+    // geomorph leaves the specimen centred on its own remaining landmarks; here it goes where a reference
+    // specimen of its size would have them.
+    // The reference specimens keep their size, so the centroid of these landmarks scales with it.
+    const shift = opts.geomorphCentring ? cm.map(() => 0) : cm.map(v => v * norm(h0) / norm(m0));
+    const x = h0.map(q => plus(rotate(Rot, q), shift)).flat();
+    const xs = R.sized.map(cfg => present.flatMap(j => cfg[j]));
+    const ys = R.sized.map(cfg => left.flatMap(j => cfg[j]));
+    const pc = x.length, mc = ys[0].length, n = xs.length;
+    const Vr = Array.from({ length: pc }, (_, a) => Array.from({ length: mc }, (_, b) => xs.reduce((s, row, i) => s + row[a] * ys[i][b], 0)));
+    const VtV = Array.from({ length: mc }, (_, a) => Array.from({ length: mc }, (_, b) => Vr.reduce((s, row) => s + row[a] * row[b], 0)));
+    const eig = symEig(VtV);
+    const top = Math.max(eig.values[0], 0);
+    const keep = eig.values.map((v, i) => i).filter(i => eig.values[i] > 1e-12 * top && eig.values[i] > 0);
+    if (n < keep.length + 2) return { reason: `regression needs more complete specimens (it has ${n}) than ${keep.length + 1}` };
+    const Vc = keep.map(i => eig.vectors.map(r => r[i]));
+    const Uc = keep.map((i, t) => Vr.map(row => row.reduce((s, v, b) => s + v * Vc[t][b], 0) / Math.sqrt(eig.values[i])));
+    const xScore = row => [1, ...Uc.map(u => u.reduce((s, v, a) => s + v * row[a], 0))];
+    const Z = xs.map(xScore), Y = ys.map(row => Vc.map(v => v.reduce((s, w, b) => s + w * row[b], 0)));
+    const q = Z[0].length;
+    const ZtZ = Array.from({ length: q }, (_, a) => Array.from({ length: q }, (_, b) => Z.reduce((s, r) => s + r[a] * r[b], 0)));
+    const ZtY = Array.from({ length: q }, (_, a) => Vc.map((_, t) => Z.reduce((s, r, i) => s + r[a] * Y[i][t], 0)));
+    const beta = solve(ZtZ, ZtY);
+    if (!beta) return { reason: 'the regression could not be solved for this specimen' };
+    const zx = xScore(x);
+    const yScore = Vc.map((_, t) => zx.reduce((s, v, a) => s + v * beta[a][t], 0));
+    const pred = Array.from({ length: mc }, (_, b) => yScore.reduce((s, v, t) => s + v * Vc[t][b], 0));
+    const back = transpose(Rot);
+    left.forEach((j, n2) => {
+      const q = pred.slice(n2 * k, n2 * k + k);
+      c[j] = plus(rotate(back, minus(q, shift)), ch);
+    });
+    return {};
+  }
+
+  /**
+   * Estimate missing landmarks. matrix: configurations with null for gaps (left unchanged).
+   * opts: method ('mirror' | 'tps' | 'reg' | 'mean'), canFill(i, j), pairs [[a, b]] of point indices,
+   * mirrorFirst, max (per specimen), groups (a label per specimen: the reference is then the same group).
+   * Returns { matrix, filled: per specimen [{ j, method }], notes: [{ i, reason }] }.
+   */
+  function impute(matrix, opts) {
+    const method = opts.method, canFill = opts.canFill || (() => true);
+    const max = opts.max == null ? Infinity : opts.max;
+    const m = matrix.map(c => c.map(q => (q ? q.slice() : null)));
+    const p = m.length ? m[0].length : 0;
+    const partner = Array.from({ length: p }, (_, j) => j);
+    for (const [a, b] of opts.pairs || []) { partner[a] = b; partner[b] = a; }
+    const hasPairs = (opts.pairs || []).length > 0;
+    const complete = m.map(c => c.every(Boolean));
+    const references = new Map();
+    const referenceFor = i => {
+      const label = opts.groups ? opts.groups[i] : '';
+      if (opts.groups && !label) return { reason: 'it has no group, and the reference is its own group' };
+      if (!references.has(label)) {
+        const members = m.map((c, n) => n).filter(n => complete[n] && (!opts.groups || opts.groups[n] === label));
+        references.set(label, members.length < 3
+          ? { reason: `the reference needs three complete specimens${opts.groups ? ` in group “${label}”` : ''} (there ${members.length === 1 ? 'is' : 'are'} ${members.length})` }
+          : buildReference(members.map(n => m[n])));
+      }
+      return references.get(label);
+    };
+    const filled = m.map(() => []), notes = [];
+    const NAMES = { mirror: 'mirroring', tps: 'thin-plate spline', reg: 'regression', mean: 'mean substitution' };
+    m.forEach((c, i) => {
+      const todo = c.map((q, j) => j).filter(j => !c[j] && canFill(i, j));
+      if (!todo.length) return;
+      if (todo.length > max) { notes.push({ i, reason: `${todo.length} missing landmarks, more than the limit of ${max}.` }); return; }
+      const reasons = [];
+      if (method === 'mirror' || opts.mirrorFirst) {
+        if (!hasPairs) reasons.push('no landmark pairs are defined for mirroring');
+        else {
+          const r = mirrorFill(c, partner, todo);
+          r.got.forEach(j => filled[i].push({ j, method: 'mirror' }));
+          if (r.reason) reasons.push(r.reason);
+        }
+      }
+      const left = todo.filter(j => !c[j]);
+      if (left.length && method === 'mirror' && !reasons.length) reasons.push(`${left.length === 1 ? 'one gap has' : `${left.length} gaps have`} no landmark on the other side to mirror`);
+      if (left.length && method !== 'mirror') {
+        const R = referenceFor(i);
+        const r = R.reason ? R : fromReference(method, c, left, R, opts);
+        if (r.reason) reasons.push(r.reason);
+        else left.forEach(j => filled[i].push({ j, method }));
+      }
+      if (reasons.length) {
+        const text = reasons.join('; ');
+        notes.push({ i, reason: `Not estimated by ${NAMES[method]}${opts.mirrorFirst && method !== 'mirror' ? ' (after mirroring)' : ''}: ${text}.` });
+      }
+    });
+    return { matrix: m, filled, notes };
   }
 
   /* ---------- checks ---------- */
@@ -440,7 +601,7 @@
   }
 
   return {
-    tpsWarp, symEig, centroidSize, rotateOnto, normalise, gpa, pca, shapeFromScores, shapeAt,
+    tpsWarp, impute, fitRigid, symEig, centroidSize, rotateOnto, normalise, gpa, pca, shapeFromScores, shapeAt,
     flagHigh, findMirrored, prepare, rawCoords, repeatability, analyse,
   };
 }));

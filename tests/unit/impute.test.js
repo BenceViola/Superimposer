@@ -56,13 +56,33 @@ for (const [label, file, key] of [['2D', 'synthetic-2d.tps', 'two'], ['3D', 'syn
     });
   });
 
-  test(`${label}: regression matches geomorph`, () => {
-    const r = GM.impute(holed(), { method: 'reg', canFill: all });
+  // geomorph centres an incomplete specimen on its remaining landmarks, while the complete ones are centred
+  // on all of theirs. That moves it against the reference and costs accuracy (see the next test), so the app
+  // places it where the reference's landmarks are. With geomorph's centring the results agree.
+  test(`${label}: regression matches geomorph when centred as geomorph does`, () => {
+    const r = GM.impute(holed(), { method: 'reg', canFill: all, geomorphCentring: true });
     M.gaps.forEach((g, n) => {
       const gaps = gapsOf(g), present = r.matrix[g.spec].map((_, j) => j).filter(j => !gaps.includes(j));
       const theirs = onto(r.matrix[g.spec], M.reg[n], present);
       for (const j of gaps) nearAll(r.matrix[g.spec][j], theirs[j], 2e-3 * scale, `specimen ${g.spec}, landmark ${j}`);
     });
+  });
+
+  test(`${label}: regression centred on the reference lands closer to the true landmarks than geomorph’s centring`, () => {
+    const truth = load(file), r = rng(99);
+    const error = extra => {
+      let sum = 0;
+      for (let t = 0; t < 60; t++) {
+        const i = Math.floor(r() * truth.length), j = Math.floor(r() * truth[0].length);
+        const m = copy(truth);
+        m[i][j] = null;
+        const q = GM.impute(m, Object.assign({ method: 'reg', canFill: all }, extra)).matrix[i][j];
+        sum += Math.hypot(...q.map((v, d) => v - truth[i][j][d]));
+      }
+      return sum;
+    };
+    const ours = error({}), theirs = error({ geomorphCentring: true });
+    assert.ok(ours < 0.5 * theirs, `${ours} vs ${theirs}`);
   });
 
   test(`${label}: imputed landmarks are listed, others left exactly as they were`, () => {
