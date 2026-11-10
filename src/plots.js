@@ -92,8 +92,8 @@
   }
 
   /** Legend entries in one row above the plot; they wrap when needed. Returns svg and the height it takes. */
-  function legend(items, W, theme) {
-    if (items.length < 2) return { svg: '', height: 0 };
+  function legend(items, W, theme, always) {
+    if (items.length < (always ? 1 : 2)) return { svg: '', height: 0 };
     let x = 12, y = 18, body = '';
     for (const it of items) {
       const w = 22 + it.label.length * 6.6 + 14;
@@ -105,15 +105,29 @@
   }
 
   const colourOf = (theme, g) => (g >= 0 ? theme.series[g % MAX_LEVELS] : theme.muted);
-  function groupLegend(groups, W, theme) {
-    if (!groups) return { svg: '', height: 0 };
+  /** Groups, and any extra entries (shown even without groups). */
+  function groupLegend(groups, W, theme, extra) {
+    extra = extra || [];
+    if (!groups) return legend(extra, W, theme, true);
     const items = groups.levels.map((label, i) => ({
       label, mark: (x, y) => marker(i, x, y, 5, `fill="${colourOf(theme, i)}"`),
     }));
     if (groups.index.some(v => v < 0)) {
       items.push({ label: 'No group', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4" fill="${theme.muted}"/>` });
     }
-    return legend(items, W, theme);
+    return legend(items.length > 1 || !extra.length ? [...items, ...extra] : extra, W, theme, extra.length > 0);
+  }
+
+  const imputedEntry = t => ({ label: 'Imputed landmark', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="5" fill="none" stroke="${t.warn}" stroke-width="2"/>` });
+  const ringEntry = t => ({ label: 'Has imputed landmarks', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="5.5" fill="none" stroke="${t.ink}" stroke-width="1.25" stroke-dasharray="2 2"/>` });
+  /** Rings around imputed landmarks: pairs of [specimen, point]. */
+  function imputedRings(list, sets, place, t) {
+    return (list || []).map(([i, j]) => {
+      const p = sets[i] && sets[i][j];
+      if (!p) return '';
+      const [x, y] = place(p);
+      return `<circle class="imputed" cx="${f(x)}" cy="${f(y)}" r="6" fill="none" stroke="${t.warn}" stroke-width="2"/>`;
+    }).join('');
   }
 
   function convexHull(points) {
@@ -134,7 +148,7 @@
   /* ---------- scatter ---------- */
   function scatter(o) {
     const W = o.width || 640, H = o.height || 460, t = o.theme;
-    const lg = groupLegend(o.groups, W, t);
+    const lg = groupLegend(o.groups, W, t, o.rings && o.rings.some(Boolean) ? [ringEntry(t)] : []);
     const m = { l: 62, r: 18, t: 14 + lg.height, b: 50 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const span = v => { const lo = Math.min(...v), hi = Math.max(...v), pad = (hi - lo || Math.abs(hi) || 1) * 0.08; return [lo - pad, hi + pad]; };
@@ -189,6 +203,10 @@
       taken.push([px, ly]);
       b += `<text class="pt-label" x="${f(px + (right ? 9 : -9))}" y="${f(ly)}" fill="${t.ink}" text-anchor="${right ? 'start' : 'end'}">${esc(label)}</text>`;
     }
+    o.x.forEach((v, i) => {
+      if (!o.rings || !o.rings[i]) return;
+      b += `<circle class="imputed-ring" cx="${f(X(v))}" cy="${f(Y(o.y[i]))}" r="9.5" fill="none" stroke="${t.ink}" stroke-width="1.25" stroke-dasharray="2.5 2"/>`;
+    });
     for (const v of o.virtual || []) {
       const px = X(v.x), py = Y(v.y), c = 6;
       b += `<g class="virtual"><path d="M${f(px - c)} ${f(py - c)}L${f(px + c)} ${f(py + c)}M${f(px - c)} ${f(py + c)}L${f(px + c)} ${f(py - c)}" stroke="${t.ink}" stroke-width="2"/>`
@@ -312,7 +330,7 @@
   /** The specimens as digitised: true position, size and orientation, each with a faint outline so it reads as one object. */
   function rawData(o) {
     const W = o.width || 640, H = o.height || 520, t = o.theme;
-    const lg = groupLegend(o.groups, W, t);
+    const lg = groupLegend(o.groups, W, t, o.imputed && o.imputed.length ? [imputedEntry(t)] : []);
     const sets = o.matrix.map(c => project(c, o.view));
     const place = fitter(sets.flat(), W, H, { l: 26, r: 26, t: 12 + lg.height, b: 16 });
     let b = lg.svg;
@@ -337,12 +355,13 @@
         b += `<circle class="selected" cx="${f(x)}" cy="${f(y)}" r="4.5" fill="none" stroke="${t.ink}" stroke-width="1.75"/>`;
       }
     });
+    b += imputedRings(o.imputed, sets, place, t);
     return frame(W, H, t, 'All specimens as digitised, before superimposition', b);
   }
 
   function superimposition(o) {
     const W = o.width || 640, H = o.height || 520, t = o.theme;
-    const lg = groupLegend(o.groups, W, t);
+    const lg = groupLegend(o.groups, W, t, o.imputed && o.imputed.length ? [imputedEntry(t)] : []);
     const aligned = o.aligned.map(c => project(c, o.view));
     const cons = project(o.consensus, o.view);
     const place = fitter([...aligned.flat(), ...cons], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
@@ -363,6 +382,7 @@
       b += `<circle class="consensus" cx="${f(x)}" cy="${f(y)}" r="${curve ? 2.5 : 4.5}" fill="${t.ink}" stroke="${t.surface}" stroke-width="1.5"><title>${esc(r.id)}${r.label ? ` · ${esc(r.label)}` : ''}</title></circle>`;
       if (labelled && !curve) b += `<text x="${f(x + 8)}" y="${f(y - 8)}" fill="${t.ink}" font-weight="600">${esc(r.id)}</text>`;
     });
+    b += imputedRings(o.imputed, aligned, place, t);
     if (o.editing && !o.forExport) {
       cons.forEach((p, i) => {
         if (o.rows[i].type === 'curve') return;

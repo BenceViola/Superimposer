@@ -14,9 +14,9 @@
 
   function scoresCSV(res, groups) {
     const cols = groups ? groups.columns : [];
-    const head = ['key', 'specimen_id', 'replicate', 'operator', 'source_file', 'n_replicates', 'flipped', 'centroid_size', 'units', 'procrustes_distance', ...cols, ...pcNames(res)];
+    const head = ['key', 'specimen_id', 'replicate', 'operator', 'source_file', 'n_replicates', 'flipped', 'n_imputed', 'centroid_size', 'units', 'procrustes_distance', ...cols, ...pcNames(res)];
     const rows = res.prep.specimens.map((s, i) => [
-      s.key, s.id, s.replicate, s.operator, s.sourceName, s.nReplicates, s.flipped ? 'yes' : 'no',
+      s.key, s.id, s.replicate, s.operator, s.sourceName, s.nReplicates, s.flipped ? 'yes' : 'no', (res.prep.imputed && res.prep.imputed[i] ? res.prep.imputed[i].length : 0),
       num(res.gpa.csize[i]), s.units, num(res.gpa.procD[i]),
       ...cols.map(c => (groups.values[i] && typeof groups.values[i] === 'object' ? groups.values[i][c] : groups.values[i]) || ''),
       ...res.pca.scores[i].map(num),
@@ -69,7 +69,9 @@
       `Semilandmarks: ${prep.semilandmarksUsed ? `${prep.semilandmarksUsed} included, NOT slid` : 'left out'}.`,
       `Replicates: ${opts.replicates === 'average' ? 'averaged per specimen and operator' : 'all kept as separate records'}.`,
       `Estimated landmarks used: ${prep.estimated}.`,
+      imputationLine(prep, opts.impute),
     ];
+    if (prep.imputeNotes && prep.imputeNotes.length) { L.push('', 'Not imputed:'); prep.imputeNotes.forEach(d => L.push(`  ${d.key}: ${d.reason}`)); }
     const flipped = prep.specimens.filter(s => s.flipped).map(s => s.key);
     if (flipped.length) L.push(`Mirrored before analysis: ${flipped.join(', ')}.`);
     if (prep.dropped.specimens.length) { L.push('', 'Specimens left out:'); prep.dropped.specimens.forEach(d => L.push(`  ${d.key}: ${d.reason}`)); }
@@ -78,8 +80,32 @@
     return L.join('\n') + '\n';
   }
 
+  const METHOD_NAMES = { mirror: 'mirroring', tps: 'thin-plate spline', reg: 'regression', mean: 'mean substitution' };
+
+  function imputationLine(prep, imp) {
+    if (!imp || !imp.method || imp.method === 'none') return 'Imputation: none.';
+    const parts = [METHOD_NAMES[imp.method] + (imp.mirrorFirst && imp.method !== 'mirror' ? ', after mirroring paired landmarks' : '')];
+    if (imp.method !== 'mirror') parts.push(`reference: ${imp.groupOf ? `complete specimens of the same ${imp.groupName || 'group'}` : 'all complete specimens'}`);
+    if (Number.isFinite(imp.max)) parts.push(`at most ${imp.max} per specimen`);
+    if (imp.notDone) parts.push('landmarks not yet placed included');
+    const n = prep.imputedCount || 0, k = (prep.imputed || []).filter(x => x.length).length;
+    return `Imputation: ${parts.join('; ')}. ${n} landmark${n === 1 ? '' : 's'} imputed in ${k} specimen${k === 1 ? '' : 's'}.`;
+  }
+
+  /** Each imputed landmark, in the specimen's own coordinates (y up, scaled; a flipped specimen back as it was). */
+  function imputedCSV(res) {
+    const k = res.prep.dim;
+    const rows = [];
+    res.prep.specimens.forEach((s, i) => (res.prep.imputed[i] || []).forEach(f => {
+      const c = res.prep.matrix[i][f.j];
+      rows.push([s.key, res.prep.rows[f.j].id, METHOD_NAMES[f.method], ...c.map((v, d) => num(d === 0 && s.flipped ? -v : v))]);
+    }));
+    return table(['key', 'point', 'method', ...axes.slice(0, k)], rows);
+  }
+
   function bundle(res, dataset, opts, groups) {
-    return [
+    const extra = res.prep.imputedCount ? [{ name: 'imputed.csv', data: imputedCSV(res) }] : [];
+    return [...extra,
       { name: 'scores.csv', data: scoresCSV(res, groups) },
       { name: 'aligned-coordinates.csv', data: alignedCSV(res) },
       { name: 'consensus.csv', data: consensusCSV(res) },
@@ -89,5 +115,5 @@
     ];
   }
 
-  return { scoresCSV, alignedCSV, consensusCSV, eigenCSV, loadingsCSV, repeatabilityCSV, settingsText, bundle };
+  return { imputedCSV, METHOD_NAMES, scoresCSV, alignedCSV, consensusCSV, eigenCSV, loadingsCSV, repeatabilityCSV, settingsText, bundle };
 }));

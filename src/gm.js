@@ -484,6 +484,26 @@
       const r = dataset.rows[i];
       return !noPt.has(r.id) && (r.type !== 'curve' || opts.semilandmarks);
     });
+    // Imputation comes first; gaps it leaves follow the missing-data choice below.
+    const imp = opts.impute && opts.impute.method && opts.impute.method !== 'none' ? opts.impute : null;
+    const imputeNotes = [];
+    if (imp && list.length && use.length) {
+      const at = new Map(use.map((row, j) => [dataset.rows[row].id, j]));
+      const pairs = (imp.pairs || []).filter(([a, b]) => a !== b && at.has(a) && at.has(b)).map(([a, b]) => [at.get(a), at.get(b)]);
+      const groups = imp.groupOf ? list.map(s => imp.groupOf.get(s.key) || imp.groupOf.get(s.id) || null) : null;
+      const res = impute(list.map(s => use.map(i => s.coords[i])), {
+        method: imp.method, mirrorFirst: imp.mirrorFirst, max: imp.max, pairs, groups,
+        canFill: (n, j) => { const st = list[n].status[use[j]]; return st === 'missing' || (!!imp.notDone && st === 'not_done'); },
+      });
+      res.notes.forEach(x => imputeNotes.push({ key: list[x.i].key, reason: x.reason }));
+      list = list.map((s, n) => {
+        if (!res.filled[n].length) return s;
+        const coords = s.coords.slice();
+        for (const f of res.filled[n]) coords[use[f.j]] = res.matrix[n][f.j];
+        return Object.assign({}, s, { coords, imputedRows: res.filled[n].map(f => ({ row: use[f.j], method: f.method })) });
+      });
+    }
+
     if (opts.missing === 'points') {
       use = use.filter(i => {
         const gaps = list.filter(s => !s.coords[i]).length;
@@ -505,7 +525,10 @@
       });
     }
     const curveRows = dataset.rows.filter(r => r.type === 'curve').length;
+    const imputed = list.map(s => (s.imputedRows || []).map(f => ({ j: use.indexOf(f.row), method: f.method })).filter(f => f.j >= 0));
     return {
+      imputed, imputeNotes, impute: imp,
+      imputedCount: imputed.reduce((n, x) => n + x.length, 0),
       dim: dataset.dim,
       rows: use.map(i => dataset.rows[i]),
       specimens: list,

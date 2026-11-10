@@ -79,7 +79,7 @@
     const at = new Map(ok ? res.prep.specimens.map((s, i) => [s.key, i]) : []);
     const groups = table ? IO.joinGroups(dataset.specimens, table).values : dataset.specimens.map(() => ({}));
     const counted = dataset.rows.map((r, i) => (r.type !== 'curve' || opts.semilandmarks ? i : -1)).filter(i => i >= 0);
-    return dataset.specimens.map((s, n) => {
+    const rows = dataset.specimens.map((s, n) => {
       const count = st => counted.filter(i => s.status[i] === st).length;
       const i = at.get(s.key);
       return {
@@ -88,9 +88,25 @@
         csize: i != null ? res.gpa.csize[i] : null,
         dist: i != null && opts.fitted ? res.gpa.procD[i] : null,
         missing: count('missing'), notDone: count('not_done'), estimated: count('estimated'),
+        imputed: 0, imputedAt: {},
         groups: groups[n], coords: s.coords, status: s.status,
       };
     });
+    // Imputed values, in the specimen's own coordinates (a flipped specimen back as it was).
+    if (ok && res.prep.imputed) {
+      const byKey = new Map(rows.map(r => [r.key, r]));
+      res.prep.specimens.forEach((s, i) => {
+        const row = byKey.get(s.key);
+        if (!row) return;
+        for (const f of res.prep.imputed[i]) {
+          const c = res.prep.matrix[i][f.j];
+          const at = dataset.rows.indexOf(res.prep.rows[f.j]);
+          row.imputedAt[at] = { method: f.method, coords: s.flipped ? [-c[0], ...c.slice(1)] : c };
+        }
+        row.imputed = res.prep.imputed[i].length;
+      });
+    }
+    return rows;
   }
 
   /**

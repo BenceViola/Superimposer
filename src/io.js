@@ -48,7 +48,7 @@
         key: '', id, replicate, operator: '', file: current.file || '', sha: '',
         sourceName, source: 'tps', dim: current.dim,
         units: k ? 'scaled' : current.dim === 2 ? 'px' : 'unknown',
-        rows: coords.map((_, j) => ({ id: `P${pad2(j + 1)}`, label: '', type: 'landmark', curve: '', index: '' })),
+        rows: coords.map((_, j) => ({ id: `P${pad2(j + 1)}`, label: '', type: 'landmark', curve: '', index: '', pair: '' })),
         coords, status: coords.map(c => (c ? 'placed' : 'missing')),
         signature: `tps:${current.dim}:${coords.length}`, templateId: '', templateName: '',
       });
@@ -137,7 +137,8 @@
         const e = entries.find(x => x && x.template_id === id);
         const pos = e && e.status !== 'missing' && Array.isArray(e.position) ? e.position : null;
         const status = !e ? 'not_done' : e.status === 'missing' ? 'missing' : pos ? (e.status === 'estimated' ? 'estimated' : 'placed') : 'not_done';
-        rows.push({ id, label: lm.name || '', type: 'landmark', curve: '', index: '', pos, status });
+        const pair = lm.bilateral_pair && lm.bilateral_pair !== id && lmIds.includes(lm.bilateral_pair) ? lm.bilateral_pair : '';
+        rows.push({ id, label: lm.name || '', type: 'landmark', curve: '', index: '', pair, pos, status });
         continue;
       }
       const c = curveDefs.find(x => x.id === id);
@@ -199,12 +200,23 @@
       operator: String((doc.provenance && doc.provenance.operator) || '').trim(),
       file: (image || mesh).file || '', sha: (image || mesh).sha256 || '',
       sourceName, source: 'lmk', dim, units,
-      rows: rows.map(({ id, label, type, curve, index }) => ({ id, label, type, curve, index })),
+      rows: rows.map(({ id, label, type, curve, index, pair }) => ({ id, label, type, curve, index, pair: pair || '' })),
       coords, status: rows.map(r => r.status),
       signature: JSON.stringify([T.id || '', dim, rows.map(r => r.id)]),
       templateId: T.id || '', templateName: T.name || T.id || '',
     };
     return { specimens: [specimen], warnings };
+  }
+
+  /** Bilateral pairs from the template, each once. */
+  function templatePairs(rows) {
+    const out = [], seen = new Set();
+    for (const r of rows) {
+      if (!r.pair || seen.has(r.id)) continue;
+      seen.add(r.id); seen.add(r.pair);
+      out.push([r.id, r.pair]);
+    }
+    return out;
   }
 
   /* ---------- combining specimens into one dataset ---------- */
@@ -434,5 +446,5 @@
     return { values, factors, unmatched, unused, idColumn };
   }
 
-  return { parseTPS, parseLmk, stem, assemble, loadFiles, zipFiles, unzipFiles, parseTable, idColumnOf, joinGroups, safeName };
+  return { templatePairs, parseTPS, parseLmk, stem, assemble, loadFiles, zipFiles, unzipFiles, parseTable, idColumnOf, joinGroups, safeName };
 }));
