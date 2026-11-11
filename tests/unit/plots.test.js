@@ -498,3 +498,9 @@ test('scatter: specimens with imputed landmarks get a dashed ring and a legend e
   assert.equal(count(s, /class="imputed-ring"/g), 2);
   assert.match(s, /Has imputed landmarks/);
 });
+
+test('shape tiles ring imputed landmarks', () => {
+  const s = PL.shapeGrid({ items: [tile('A', { imputed: [1, 3] })], mean: res.gpa.consensus, rows: res.prep.rows, theme: PL.THEMES.light, width: 480 });
+  assert.equal(count(s, /class="imputed"/g), 2);
+  assert.match(s, /Imputed landmark/);
+});

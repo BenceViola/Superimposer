@@ -49,3 +49,14 @@ test('the example has replicates, and curve points', async () => {
   assert.ok(GM.repeatability(data).specimens.length >= 3);
   assert.ok(data.rows.some(r => r.type === 'curve'));
 });
+
+test('three example specimens have missing landmarks, for trying imputation', async () => {
+  const { data } = await load();
+  const gappy = data.specimens.filter(s => s.status.some(x => x === 'missing')).map(s => s.key);
+  assert.deepEqual(gappy, ['EX_14', 'EX_17', 'EX_21']);
+  const res = GM.analyse(data);
+  assert.equal(res.prep.dropped.specimens.length, 3);
+  const filled = GM.analyse(data, { impute: { method: 'tps', max: 3 } });
+  assert.equal(filled.prep.imputedCount, 4);
+  assert.equal(filled.prep.dropped.specimens.length, 0);
+});
