@@ -31,7 +31,8 @@ To colour by group, add a CSV with a specimen column (`specimen_id`, `id`, or si
 - **TPS `CURVES=` blocks are skipped.** Our own TPS exports write semilandmarks as ordinary rows, so they look like fixed landmarks after import. For curve data, use `.lmk.json`.
 - **TPS IDs may contain the operator** when a combined export had several operators (`A_ann_r2`). The replicate is read back; the operator stays part of the ID.
 - **Semilandmarks are left out by default.** They can be included, but they are not slid yet, so such results are only exploratory.
-- **Missing landmarks** need a choice: leave out the specimen (default) or the landmark. There is no imputation.
+- **Missing landmarks** can be imputed by mirroring (paired landmarks, from the template's `bilateral_pair` or a loaded CSV), thin-plate spline, regression or mean substitution, optionally mirroring first, with a limit per specimen and a choice of reference (all complete specimens, or the same group). Only landmarks marked `missing` are imputed unless "not yet placed" is ticked. Imputed landmarks are ringed in the figures, shown in the Data table, and listed in `imputed.csv`. Gaps that are not imputed lead to leaving out the specimen (default) or the landmark.
+- **Imputation and geomorph:** the thin-plate spline matches `estimate.missing(method = "TPS")`. Regression follows `method = "Reg"`, except that the incomplete specimen is placed where a reference specimen of its size has those landmarks, rather than centred on its own; on the test data that is several times more accurate. Mean substitution shrinks variation and is there mainly for teaching.
 - **y points up**, as in TPS. 2D `.lmk.json` files are flipped on import.
 - **Centroid size in pixels** is only comparable at equal magnification.
 

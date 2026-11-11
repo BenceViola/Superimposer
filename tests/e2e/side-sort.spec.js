@@ -4,6 +4,12 @@ const { openApp, loadExample, loadRaw, expect } = require('./helpers.js');
 
 const keys = page => page.locator('#tblSpecimens tbody tr').evaluateAll(rows => rows.map(r => r.dataset.key));
 const dists = page => page.locator('#tblSpecimens tbody tr td.num').evaluateAll(cells => cells.map(c => parseFloat(c.textContent)).filter(Number.isFinite));
+/** Keys of the rows at the bottom that have no distance. */
+const blankTail = page => page.locator('#tblSpecimens tbody tr').evaluateAll(rows => {
+  const out = [];
+  for (const r of [...rows].reverse()) { if (r.querySelector('td.num').textContent.trim()) break; out.push(r.dataset.key); }
+  return out;
+});
 const sortBy = (page, col) => page.click(`#tblSpecimens thead button[data-sort="${col}"]`);
 
 test('the distance heading sorts the largest distances first, then reverses', async ({ page }) => {
@@ -46,9 +52,9 @@ test('specimens without a distance stay at the bottom', async ({ page }) => {
   await loadExample(page);
   await page.locator('#tblSpecimens tr[data-key="EX_05"] input[type=checkbox]').uncheck();
   await sortBy(page, 'dist');
-  expect((await keys(page)).slice(-1)).toEqual(['EX_05']);
+  expect(await blankTail(page)).toContain('EX_05');
   await sortBy(page, 'dist');
-  expect((await keys(page)).slice(-1)).toEqual(['EX_05']);
+  expect(await blankTail(page)).toContain('EX_05');
 });
 
 test('the sort stays when the analysis changes', async ({ page }) => {
@@ -57,7 +63,7 @@ test('the sort stays when the analysis changes', async ({ page }) => {
   await sortBy(page, 'dist');
   const fourth = (await keys(page))[3];
   await page.locator(`#tblSpecimens tr[data-key="${fourth}"] input[type=checkbox]`).uncheck();
-  expect((await keys(page)).slice(-1)).toEqual([fourth]);
+  expect(await blankTail(page)).toContain(fourth);
   const d = await dists(page);
   expect(d).toEqual([...d].sort((a, b) => b - a));
 });

@@ -422,6 +422,7 @@
         : { label: 'Mean shape', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4" fill="none" stroke="${t.muted}" stroke-width="1.5"/>` },
       { label: o.targetLabel || 'Target', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4.5" fill="${colour}"/>` },
     ];
+    if (o.imputed && o.imputed.length) items.push(imputedEntry(t));
     const lg = legend(items, W, t);
     const place = fitter(lines ? [...lines.flat(), ...target] : [...mean, ...target], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
     let b = lg.svg;
@@ -452,6 +453,7 @@
       b += `<circle class="target" cx="${f(x1)}" cy="${f(y1)}" r="${curve ? 2.25 : 4}" fill="${colour}" stroke="${t.surface}" stroke-width="1"><title>${esc(o.rows[i].id)}</title></circle>`;
       if (o.labels !== false && !curve && mean.length <= 40) b += `<text x="${f(x1 + 7)}" y="${f(y1 - 7)}" fill="${t.ink}">${esc(o.rows[i].id)}</text>`;
     });
+    b += imputedRings((o.imputed || []).map(j => [0, j]), [target], place, t);
     return frame(W, H, t, `Shape change from the mean to ${o.targetLabel || 'the target'}`, b);
   }
 
@@ -468,7 +470,7 @@
       const svg = shapeChange({
         mean: o.mean, target: it.target, rows: o.rows, links: o.links, view: o.view, theme: t,
         labels: n === 1 && o.labels !== false, width: tileW, height: tileH,
-        targetLabel: it.label, targetColour: it.colour, warp: it.warp,
+        targetLabel: it.label, targetColour: it.colour, warp: it.warp, imputed: it.imputed,
       });
       b += svg.replace('<svg ', `<svg x="${(i % cols) * tileW}" y="${Math.floor(i / cols) * tileH}" `);
     });

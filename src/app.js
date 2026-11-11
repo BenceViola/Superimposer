@@ -14,6 +14,7 @@
     all: [], warnings: [], refused: [], confirmTps: false, table: null,
     dataset: null, res: null, repeat: null,
     missing: 'specimens', replicates: 'all', semilandmarks: false,
+    impute: { method: 'none', mirrorFirst: false, max: 3, notDone: false, ref: '' }, pairs: [], pairsFile: '',
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
     colour: '', labels: true, hulls: false, equal: true,
     links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
@@ -24,7 +25,20 @@
   };
   window.__sup = { S, TB };
 
-  const optsNow = () => ({ missing: S.missing, replicates: S.replicates, semilandmarks: S.semilandmarks, flip: S.flip, excludeSpecimens: S.excludeSpecimens, excludePoints: S.excludePoints });
+  /** Bilateral pairs: loaded from a file, otherwise from the template. */
+  const templatePairsNow = () => (S.dataset ? IO.templatePairs(S.dataset.rows) : []);
+  const pairsNow = () => (S.pairs.length ? S.pairs : templatePairsNow());
+  function imputeNow() {
+    const m = S.impute;
+    if (m.method === 'none') return undefined;
+    let groupOf;
+    if (m.ref && S.table && S.dataset) {
+      const values = IO.joinGroups(S.dataset.specimens, S.table).values;
+      groupOf = new Map(S.dataset.specimens.map((s, i) => [s.key, values[i][m.ref] || null]));
+    }
+    return { method: m.method, mirrorFirst: m.mirrorFirst, max: m.max, notDone: m.notDone, pairs: pairsNow(), groupOf, groupName: m.ref || undefined };
+  }
+  const optsNow = () => ({ impute: imputeNow(), missing: S.missing, replicates: S.replicates, semilandmarks: S.semilandmarks, flip: S.flip, excludeSpecimens: S.excludeSpecimens, excludePoints: S.excludePoints });
   const theme = () => {
     const forced = document.documentElement.dataset.theme;
     const dark = forced ? forced === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -42,7 +56,7 @@
     S.repeat = GM.repeatability(S.dataset);
     // A theoretical shape only means something in the PCA it came from.
     const fitted = S.res && S.res.ok ? S.res.prep : null;
-    const sig = fitted ? JSON.stringify([fitted.specimens.map(s => [s.key, s.flipped]), fitted.rows.map(r => r.id)]) : '';
+    const sig = fitted ? JSON.stringify([fitted.specimens.map(s => [s.key, s.flipped]), fitted.rows.map(r => r.id), S.impute]) : '';
     if (sig !== S.analysisSig) { S.analysisSig = sig; S.picked = S.picked.filter(p => !p.virtual); }
     if (S.res && S.res.ok) {
       const q = S.res.pca.values.length;
@@ -57,6 +71,14 @@
   const storeKey = sig => `superimposer:links:${sig}`;
   const styleKey = sig => `superimposer:styles:${sig}`;
   const groupKey = sig => `superimposer:groups:${sig}`;
+  const pairsKey = sig => `superimposer:pairs:${sig}`;
+  function writePairs() {
+    if (!S.linkSig) return;
+    try {
+      if (S.pairs.length) localStorage.setItem(pairsKey(S.linkSig), JSON.stringify({ pairs: S.pairs, file: S.pairsFile }));
+      else localStorage.removeItem(pairsKey(S.linkSig));
+    } catch { /* see writeStored */ }
+  }
   function writeGroups() {
     if (!S.linkSig || !S.table) return;
     try { localStorage.setItem(groupKey(S.linkSig), JSON.stringify(S.table)); } catch { /* see writeStored */ }
@@ -85,6 +107,9 @@
     S.linkSig = sig;
     S.links = sig ? readJson(storeKey(sig), []) : [];
     S.styles = sig ? readJson(styleKey(sig), {}) : {};
+    const storedPairs = sig ? readJson(pairsKey(sig), null) : null;
+    S.pairs = storedPairs ? storedPairs.pairs : [];
+    S.pairsFile = storedPairs ? storedPairs.file : '';
     if (sig && !S.table) {
       S.table = readJson(groupKey(sig), null);
       if (S.table) S.tableReport = 'Group columns remembered from your last session in this browser.';
@@ -196,13 +221,15 @@
     const th = theme();
     const arrow = col => (S.dtSort && S.dtSort.col === col ? (S.dtSort.dir > 0 ? ' ▲' : ' ▼') : '');
     const head = (col, label) => `<button type="button" data-sort="${esc(col)}">${esc(label)}${arrow(col)}</button>`;
-    const BASE = [['replicate', 'Rep.'], ['operator', 'Operator'], ['source', 'Source'], ['units', 'Units'], ['csize', 'Centroid size'], ['dist', 'Proc. distance'], ['missing', 'Missing'], ['notDone', 'Not done'], ['estimated', 'Estimated']];
+    const BASE = [['replicate', 'Rep.'], ['operator', 'Operator'], ['source', 'Source'], ['units', 'Units'], ['csize', 'Centroid size'], ['dist', 'Proc. distance'], ['missing', 'Missing'], ['notDone', 'Not done'], ['estimated', 'Estimated'], ['imputed', 'Imputed']];
     const numCell = (v, text, c, extra) => `<td class="n ${extra || ''}" data-c="${c}">${v == null || v === 0 ? '' : text}</td>`;
 
     const lines = rows.map(r => {
       const coordCells = points.flatMap(p => axes.map((a, d) => {
         const c = r.coords[p.at], name = `${p.id}_${a}`;
         const est = r.status[p.at] === 'estimated' ? 'dt-est' : '';
+        const imp = r.imputedAt[p.at];
+        if (!c && imp) return `<td class="n dt-imp" data-c="${esc(name)}" title="Imputed by ${esc(EX.METHOD_NAMES[imp.method])}">${imp.coords[d].toFixed(3)}</td>`;
         return c ? `<td class="n ${est}" data-c="${esc(name)}">${c[d].toFixed(3)}</td>` : `<td class="dt-gap" data-c="${esc(name)}">–</td>`;
       })).join('');
       return `<tr data-key="${esc(r.key)}" class="${S.dtSelected.has(r.key) ? 'ticked' : ''} ${r.use ? '' : 'left-out'}">`
@@ -217,6 +244,7 @@
         + numCell(r.missing, r.missing, 'missing', r.missing ? 'has-gap' : '')
         + numCell(r.notDone, r.notDone, 'notDone', r.notDone ? 'has-gap' : '')
         + numCell(r.estimated, r.estimated, 'estimated')
+        + numCell(r.imputed, r.imputed, 'imputed')
         + coordCells + '</tr>';
     }).join('');
 
@@ -391,6 +419,11 @@
       for (const x of prep.dropped.specimens) notes.push(`<span class="mono">${esc(x.key)}</span> left out: ${esc(x.reason)}`);
       for (const x of prep.dropped.points) notes.push(`<span class="mono">${esc(x.id)}</span> left out: ${esc(x.reason)}`);
       if (prep.estimated) notes.push(`${plural(prep.estimated, 'estimated landmark')} used in the analysis.`);
+      if (prep.impute) {
+        const k = prep.imputed.filter(x => x.length).length;
+        notes.push(`${plural(prep.imputedCount, 'landmark')} imputed in ${plural(k, 'specimen')} by ${EX.METHOD_NAMES[prep.impute.method]}${prep.impute.mirrorFirst && prep.impute.method !== 'mirror' ? ' (after mirroring)' : ''}. Ringed in the figures.`);
+        for (const x of prep.imputeNotes) notes.push(`<span class="mono">${esc(x.key)}</span>: ${esc(x.reason)}`);
+      }
       if (prep.semilandmarksUsed) notes.push(`${plural(prep.semilandmarksUsed, 'semilandmark')} included but not slid, so treat the results as exploratory.`);
       else if (prep.semilandmarksAvailable) notes.push(`${plural(prep.semilandmarksAvailable, 'semilandmark')} left out. They need sliding, which comes later.`);
     }
@@ -415,6 +448,26 @@
 
     // controls
     $('selMissing').value = S.missing;
+    // imputation
+    const imp = S.impute, imputing = imp.method !== 'none', usesPairs = imp.method === 'mirror' || imp.mirrorFirst;
+    $('selImpute').value = imp.method;
+    $('imputeOpts').hidden = !imputing;
+    $('mirrorFirstRow').hidden = imp.method === 'mirror';
+    $('chkMirrorFirst').checked = imp.mirrorFirst;
+    $('pairsRow').hidden = !usesPairs;
+    const fromTemplate = templatePairsNow().length;
+    $('pairsInfo').textContent = S.pairs.length
+      ? `${plural(S.pairs.length, 'pair')} loaded${S.pairsFile ? ` from ${S.pairsFile}` : ''}${fromTemplate ? ' (instead of the template’s)' : ''}.`
+      : fromTemplate ? `${plural(fromTemplate, 'pair')} from the template.` : 'No pairs: the template defines none. Load a CSV with one pair per line.';
+    $('bClearPairs').hidden = !S.pairs.length;
+    $('refRow').hidden = imp.method === 'mirror';
+    const refCols = S.table ? S.table.columns.filter(c => c !== TB.idColumn(S.table)) : [];
+    if (imp.ref && !refCols.includes(imp.ref)) imp.ref = '';
+    $('selImputeRef').innerHTML = '<option value="">All complete specimens</option>' + refCols.map(c => `<option value="${esc(c)}">Same ${esc(c)}</option>`).join('');
+    $('selImputeRef').value = imp.ref;
+    $('selImputeMax').value = Number.isFinite(imp.max) ? String(imp.max) : 'any';
+    $('chkNotDone').checked = imp.notDone;
+    $('missingLabel').textContent = imputing ? 'Landmarks not imputed' : 'Missing landmarks';
     $('selReplicates').value = S.replicates;
     $('semiRow').hidden = !d.rows.some(r => r.type === 'curve');
     $('chkSemi').checked = S.semilandmarks;
@@ -446,7 +499,8 @@
     const distTitle = ok ? 'Sort by Procrustes distance to the consensus' : 'Distances appear after the Procrustes fit';
     $('tblSpecimens').innerHTML = `<thead><tr><th></th><th></th><th>${sortHead('key', 'Specimen', 'Sort by name')}</th><th class="num">${sortHead('dist', 'Dist.', distTitle)}</th></tr></thead><tbody>` + order.map(({ s, row, i }) => {
       const off = S.excludeSpecimens.has(s.key);
-      const why = off ? '' : droppedBy.get(s.key) || (i == null && S.replicates === 'average' ? 'averaged' : '');
+      const nImputed = i != null && prep.imputed ? prep.imputed[i].length : 0;
+      const why = off ? '' : droppedBy.get(s.key) || (i == null && S.replicates === 'average' ? 'averaged' : nImputed ? `${nImputed} imputed` : '');
       const dist = ok && i != null ? res.gpa.procD[i].toFixed(4) : '';
       const flag = ok && i != null && res.outliers[i];
       return `<tr class="${off ? 'off' : ''} ${pickedSet.has(s.key) ? 'sel' : ''}" data-key="${esc(s.key)}"><td><input type="checkbox" ${off ? '' : 'checked'} aria-label="Use ${esc(s.key)}"></td>`
@@ -479,15 +533,16 @@
     const { res } = S, keys = res.prep.specimens.map(s => s.key);
     const out = [];
     S.picked.forEach((p, index) => {
-      let target, colour;
+      let target, colour, imputed;
       if (p.virtual) target = GM.shapeFromScores(res.pca, p.scores);
       else {
         const i = keys.indexOf(p.key);
         if (i < 0) return;
         target = res.gpa.tangent[i];
         colour = paints[i];
+        imputed = res.prep.imputed[i].map(x => x.j);
       }
-      out.push({ target, colour, label: p.virtual ? p.label.replace(/PC\d+ /g, '').replace('Theoretical: ', 'Theoretical (') + ')' : p.label, index, warp: useGrid() ? GM.tpsWarp(res.gpa.consensus, target) || undefined : undefined });
+      out.push({ target, colour, imputed, label: p.virtual ? p.label.replace(/PC\d+ /g, '').replace('Theoretical: ', 'Theoretical (') + ')' : p.label, index, warp: useGrid() ? GM.tpsWarp(res.gpa.consensus, target) || undefined : undefined });
     });
     return out;
   }
@@ -529,17 +584,19 @@
     const groups = currentGroups(options);
     const keys = res.prep.specimens.map(s => s.key);
     const view = res.prep.dim === 3 ? S.view : null;
-    const tip = res.prep.specimens.map((s, i) => `size ${res.gpa.csize[i].toPrecision(4)} · dist ${res.gpa.procD[i].toFixed(4)}`);
+    const tip = res.prep.specimens.map((s, i) => `size ${res.gpa.csize[i].toPrecision(4)} · dist ${res.gpa.procD[i].toFixed(4)}${res.prep.imputed[i].length ? ` · ${res.prep.imputed[i].length} imputed` : ''}`);
+    const imputed = res.prep.imputed.flatMap((list, i) => list.map(x => [i, x.j]));
+    const rings = res.prep.imputed.map(list => list.length > 0);
     const links = LK.indexPairs(S.links, res.prep.rows);
     const startAt = S.linkStart == null ? -1 : res.prep.rows.findIndex(r => r.id === S.linkStart);
     const styles = PL.resolveStyles(keys, groups, S.styles);
     const selected = S.picked.filter(p => !p.virtual).map(p => p.key);
-    const base = { keys, selected, styles, groups, outliers: res.outliers, tips: tip, hulls: S.hulls };
+    const base = { keys, selected, styles, groups, outliers: res.outliers, tips: tip, hulls: S.hulls, rings };
     const col = c => res.pca.scores.map(r => r[c]);
     return {
       super: (theme_, extra) => (!S.fitted
-        ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, styles, selected, view, links, theme: theme_ }, extra))
-        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, styles, selected, view, labels: S.labels, links, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
+        ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, styles, selected, view, links, imputed, theme: theme_ }, extra))
+        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, styles, selected, view, labels: S.labels, links, imputed, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
       scatter: (theme_, extra) => PL.scatter(Object.assign({}, base, { x: col(S.pcX), y: col(S.pcY), xLabel: pcName(S.pcX), yLabel: pcName(S.pcY), equal: S.equal, zeroLines: true, virtual: S.picked.filter(p => p.virtual).map(p => ({ x: p.scores[S.pcX], y: p.scores[S.pcY], label: 'Theoretical' })), theme: theme_ }, extra)),
       picked: (theme_, extra) => PL.shapeGrid({ items: pickedItems(styles.map(st => PL.colourValue(st.colour, theme_))), mean: res.gpa.consensus, rows: res.prep.rows, links, view, labels: S.labels, theme: theme_, width: extra && extra.width }),
       scree: (theme_, extra) => PL.scree(Object.assign({ proportion: res.pca.proportion, theme: theme_, height: 190 }, extra)),
@@ -874,6 +931,24 @@
   on($('bFlipAll'), 'click', () => { for (const k of S.res.mirrored) S.flip.add(k); rerun(); });
   on($('bUnflip'), 'click', () => { S.flip = new Set(); rerun(); });
   bindChange('selMissing', t => { S.missing = t.value; });
+  bindChange('selImpute', t => { S.impute.method = t.value; });
+  bindChange('chkMirrorFirst', t => { S.impute.mirrorFirst = t.checked; });
+  bindChange('selImputeRef', t => { S.impute.ref = t.value; });
+  bindChange('selImputeMax', t => { S.impute.max = t.value === 'any' ? Infinity : Number(t.value); });
+  bindChange('chkNotDone', t => { S.impute.notDone = t.checked; });
+  on($('bLoadPairs'), 'click', () => $('fPairs').click());
+  on($('bClearPairs'), 'click', () => { S.pairs = []; S.pairsFile = ''; writePairs(); rerun(); });
+  on($('fPairs'), 'change', async e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f || !S.dataset) return;
+    const r = LK.parse(await f.text(), S.dataset.rows.filter(x => x.type !== 'curve').map(x => x.id));
+    S.pairs = r.links;
+    S.pairsFile = f.name;
+    S.linkReport = r.unknown.length ? `${f.name}: ${plural(r.unknown.length, 'line')} not used: ${r.unknown.slice(0, 6).join('; ')}` : '';
+    writePairs();
+    rerun();
+  });
   bindChange('selReplicates', t => { S.replicates = t.value; });
   bindChange('chkSemi', t => { S.semilandmarks = t.checked; });
   bindChange('selColour', t => { S.colour = t.value; });

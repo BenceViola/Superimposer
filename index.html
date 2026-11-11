@@ -26,6 +26,7 @@
       <button class="btn" id="bClear" type="button" disabled>Clear</button>
     </div>
     <input type="file" id="fData" accept=".json,.tps,.txt,.zip,application/json,application/zip,text/plain" multiple hidden>
+    <input type="file" id="fPairs" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
     <input type="file" id="fLinks" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
     <input type="file" id="fGroups" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
   </header>
@@ -59,7 +60,38 @@
 
       <section class="card">
         <h2>Analysis</h2>
-        <label class="field">Missing landmarks
+        <label class="field">Impute missing landmarks
+          <select id="selImpute">
+            <option value="none">No</option>
+            <option value="mirror">Mirroring (paired landmarks)</option>
+            <option value="tps">Thin-plate spline</option>
+            <option value="reg">Regression</option>
+            <option value="mean">Mean substitution</option>
+          </select>
+        </label>
+        <div class="sub-opts" id="imputeOpts" hidden>
+          <label class="check" id="mirrorFirstRow"><input type="checkbox" id="chkMirrorFirst"> Mirror paired landmarks first</label>
+          <div class="pairs" id="pairsRow">
+            <span class="hint" id="pairsInfo"></span>
+            <button class="btn sm" id="bLoadPairs" type="button" title="A CSV with two landmark columns, one pair per line">Load pairs</button>
+            <button class="btn sm" id="bClearPairs" type="button">Remove</button>
+          </div>
+          <label class="field" id="refRow">Reference
+            <select id="selImputeRef"></select>
+          </label>
+          <label class="field">At most, per specimen
+            <select id="selImputeMax">
+              <option value="1">1 landmark</option>
+              <option value="2">2 landmarks</option>
+              <option value="3">3 landmarks</option>
+              <option value="5">5 landmarks</option>
+              <option value="10">10 landmarks</option>
+              <option value="any">Any number</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="chkNotDone"> Also landmarks not yet placed</label>
+        </div>
+        <label class="field"><span id="missingLabel">Missing landmarks</span>
           <select id="selMissing">
             <option value="specimens">Leave out the specimen</option>
             <option value="points">Leave out the landmark</option>

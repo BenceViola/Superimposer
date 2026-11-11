@@ -49,7 +49,7 @@
     });
   }
 
-  function makeDoc(id, replicate, shape, curveShape, placement, r, jitter, mirrored) {
+  function makeDoc(id, replicate, shape, curveShape, placement, r, jitter, mirrored, gaps) {
     const put = p => {
       const q = pose([p[0] + jitter * gauss(r), p[1] + jitter * gauss(r)], ...placement);
       return [Number((mirrored ? WIDTH - q[0] : q[0]).toFixed(2)), Number(q[1].toFixed(2))];
@@ -61,7 +61,12 @@
         image: { file: `${id}.png`, sha256: `example-${id}`, width: WIDTH, height: HEIGHT, scale: { value: 0.04, units: 'mm', method: 'manual' } },
       },
       template,
-      landmarks: shape.map((p, i) => ({ id: ids[i], template_id: ids[i], status: 'placed', position: put(p) })),
+      landmarks: shape.map((p, i) => {
+        const position = put(p); // always, so the random sequence stays the same
+        return gaps && gaps.includes(i)
+          ? { id: ids[i], template_id: ids[i], status: 'missing', position: null, note: 'Damaged (example)' }
+          : { id: ids[i], template_id: ids[i], status: 'placed', position };
+      }),
       curves: [{ id: 'C01', template_id: 'C01', status: 'placed', points: curveShape.map(p => ({ position: put(p) })) }],
       provenance: { software: 'superimposer example' },
     };
@@ -80,7 +85,8 @@
       const curve = curvePoints(shape[2], shape[3], 0.22, r, 0.02);
       const placement = [38 + 44 * r(), 0.22 * gauss(r), 300 + 600 * r(), 230 + 240 * r()];
       const mirrored = i === 6;
-      files.push({ name: `${id}.lmk.json`, data: JSON.stringify(makeDoc(id, 1, shape, curve, placement, r, 0, mirrored)) });
+      const gaps = { 13: [4], 16: [1, 8], 20: [9] }[i]; // a few damaged fish, to try imputation on
+      files.push({ name: `${id}.lmk.json`, data: JSON.stringify(makeDoc(id, 1, shape, curve, placement, r, 0, mirrored, gaps)) });
       if (i % 8 === 1) {
         files.push({ name: `${id}_r2.lmk.json`, data: JSON.stringify(makeDoc(id, 2, shape, curve, placement, r, 0.05, mirrored)) });
       }
