@@ -562,7 +562,8 @@
   function shapeOptions(th) {
     const { res } = S, pc = S.shapePc;
     const col = res.pca.scores.map(r => r[pc]);
-    const reach = S.shapeT >= 0 ? Math.max(...col) : Math.min(...col);
+    const [lowest, highest] = col.reduce(([lo, hi], v) => [Math.min(lo, v), Math.max(hi, v)], [Infinity, -Infinity]);
+    const reach = S.shapeT >= 0 ? highest : lowest;
     const score = Math.abs(S.shapeT) * reach * S.mag;
     const sign = score >= 0 ? '+' : '';
     return {
@@ -684,9 +685,9 @@
     for (const f of fileList) files.push({ name: f.name, data: await fileBytes(f) });
     const r = await IO.loadFiles(files);
     S.fitted = false;
-    S.all.push(...r.specimens);
-    S.warnings.push(...r.warnings);
-    S.refused.push(...r.refused);
+    S.all = S.all.concat(r.specimens);
+    S.warnings = S.warnings.concat(r.warnings);
+    S.refused = S.refused.concat(r.refused);
     rerun();
   }
 
@@ -701,7 +702,7 @@
     clearAll(false);
     const ex = EXAMPLE.make();
     const r = await IO.loadFiles(ex.files);
-    S.all.push(...r.specimens);
+    S.all = S.all.concat(r.specimens);
     S.table = IO.parseTable(ex.groups);
     S.tableReport = '';
     rerun();

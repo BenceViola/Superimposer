@@ -374,7 +374,7 @@
   /** files: [{ name, data }] → { specimens, warnings, refused: [{ name, reason }] }. */
   async function loadFiles(files) {
     const out = { specimens: [], warnings: [], refused: [] };
-    const take = r => { out.specimens.push(...r.specimens); out.warnings.push(...r.warnings); };
+    const take = r => { out.specimens = out.specimens.concat(r.specimens); out.warnings = out.warnings.concat(r.warnings); };
     const readOne = (name, data, inZip) => {
       const text = textOf(data);
       if (/\.json$/i.test(name)) {

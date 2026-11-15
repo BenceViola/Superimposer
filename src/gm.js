@@ -7,47 +7,131 @@
 }(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  /** Smallest and largest value, without spreading the list into arguments (which overflows on long lists). */
+  function extent(values) {
+    let lo = Infinity, hi = -Infinity;
+    for (const v of values) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    return [lo, hi];
+  }
+
   /* ---------- linear algebra ---------- */
-  /** Eigen-decomposition of a symmetric matrix (cyclic Jacobi). vectors[i][j]: component i of eigenvector j. */
+  /**
+   * Eigen-decomposition of a symmetric matrix: Householder reduction to tridiagonal form, then the
+   * QL algorithm with implicit shifts (tred2 and tql2, as in EISPACK and JAMA). O(n³), a few times
+   * faster than Jacobi rotations on the matrices a PCA produces.
+   * Returns values in decreasing order; vectors[i][j] is component i of eigenvector j.
+   */
   function symEig(A) {
     const n = A.length;
-    const a = new Float64Array(n * n), v = new Float64Array(n * n);
-    for (let i = 0; i < n; i++) { for (let j = 0; j < n; j++) a[i * n + j] = A[i][j]; v[i * n + i] = 1; }
-    let norm = 0;
-    for (let i = 0; i < n * n; i++) norm += a[i] * a[i];
-    for (let sweep = 0; sweep < 100; sweep++) {
-      let off = 0;
-      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += a[i * n + j] * a[i * n + j];
-      if (off <= 1e-32 * norm || off === 0) break;
-      for (let p = 0; p < n - 1; p++) {
-        for (let q = p + 1; q < n; q++) {
-          const apq = a[p * n + q];
-          if (Math.abs(apq) < 1e-300) continue;
-          const theta = (a[q * n + q] - a[p * n + p]) / (2 * apq);
-          const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
-          const c = 1 / Math.sqrt(t * t + 1), s = t * c;
-          for (let k = 0; k < n; k++) {
-            const akp = a[k * n + p], akq = a[k * n + q];
-            a[k * n + p] = c * akp - s * akq;
-            a[k * n + q] = s * akp + c * akq;
-          }
-          for (let k = 0; k < n; k++) {
-            const apk = a[p * n + k], aqk = a[q * n + k];
-            a[p * n + k] = c * apk - s * aqk;
-            a[q * n + k] = s * apk + c * aqk;
-          }
-          for (let k = 0; k < n; k++) {
-            const vkp = v[k * n + p], vkq = v[k * n + q];
-            v[k * n + p] = c * vkp - s * vkq;
-            v[k * n + q] = s * vkp + c * vkq;
-          }
+    if (!n) return { values: [], vectors: [] };
+    const V = A.map(r => Float64Array.from(r));
+    const d = new Float64Array(n), e = new Float64Array(n);
+    // tred2
+    for (let j = 0; j < n; j++) d[j] = V[n - 1][j];
+    for (let i = n - 1; i > 0; i--) {
+      let scale = 0, h = 0;
+      for (let k = 0; k < i; k++) scale += Math.abs(d[k]);
+      if (scale === 0) {
+        e[i] = d[i - 1];
+        for (let j = 0; j < i; j++) { d[j] = V[i - 1][j]; V[i][j] = 0; V[j][i] = 0; }
+      } else {
+        for (let k = 0; k < i; k++) { d[k] /= scale; h += d[k] * d[k]; }
+        let f = d[i - 1], g = Math.sqrt(h);
+        if (f > 0) g = -g;
+        e[i] = scale * g;
+        h -= f * g;
+        d[i - 1] = f - g;
+        for (let j = 0; j < i; j++) e[j] = 0;
+        for (let j = 0; j < i; j++) {
+          f = d[j];
+          V[j][i] = f;
+          g = e[j] + V[j][j] * f;
+          for (let k = j + 1; k <= i - 1; k++) { g += V[k][j] * d[k]; e[k] += V[k][j] * f; }
+          e[j] = g;
+        }
+        f = 0;
+        for (let j = 0; j < i; j++) { e[j] /= h; f += e[j] * d[j]; }
+        const hh = f / (h + h);
+        for (let j = 0; j < i; j++) e[j] -= hh * d[j];
+        for (let j = 0; j < i; j++) {
+          f = d[j]; g = e[j];
+          for (let k = j; k <= i - 1; k++) V[k][j] -= f * e[k] + g * d[k];
+          d[j] = V[i - 1][j];
+          V[i][j] = 0;
         }
       }
+      d[i] = h;
     }
-    const order = Array.from({ length: n }, (_, i) => i).sort((x, y) => a[y * n + y] - a[x * n + x]);
+    for (let i = 0; i < n - 1; i++) {
+      V[n - 1][i] = V[i][i];
+      V[i][i] = 1;
+      const h = d[i + 1];
+      if (h !== 0) {
+        for (let k = 0; k <= i; k++) d[k] = V[k][i + 1] / h;
+        for (let j = 0; j <= i; j++) {
+          let g = 0;
+          for (let k = 0; k <= i; k++) g += V[k][i + 1] * V[k][j];
+          for (let k = 0; k <= i; k++) V[k][j] -= g * d[k];
+        }
+      }
+      for (let k = 0; k <= i; k++) V[k][i + 1] = 0;
+    }
+    for (let j = 0; j < n; j++) { d[j] = V[n - 1][j]; V[n - 1][j] = 0; }
+    V[n - 1][n - 1] = 1;
+    e[0] = 0;
+    // tql2
+    for (let i = 1; i < n; i++) e[i - 1] = e[i];
+    e[n - 1] = 0;
+    let f = 0, tst1 = 0;
+    const eps = 2 ** -52;
+    for (let l = 0; l < n; l++) {
+      tst1 = Math.max(tst1, Math.abs(d[l]) + Math.abs(e[l]));
+      let m = l;
+      while (m < n) { if (Math.abs(e[m]) <= eps * tst1) break; m++; }
+      if (m > l) {
+        for (let iter = 0; iter < 60; iter++) {
+          let g = d[l];
+          let p = (d[l + 1] - g) / (2 * e[l]);
+          let r = Math.hypot(p, 1);
+          if (p < 0) r = -r;
+          d[l] = e[l] / (p + r);
+          d[l + 1] = e[l] * (p + r);
+          const dl1 = d[l + 1];
+          let h = g - d[l];
+          for (let i = l + 2; i < n; i++) d[i] -= h;
+          f += h;
+          p = d[m];
+          let c = 1, c2 = c, c3 = c, s = 0, s2 = 0;
+          const el1 = e[l + 1];
+          for (let i = m - 1; i >= l; i--) {
+            c3 = c2; c2 = c; s2 = s;
+            g = c * e[i];
+            h = c * p;
+            r = Math.hypot(p, e[i]);
+            e[i + 1] = s * r;
+            s = e[i] / r;
+            c = p / r;
+            p = c * d[i] - s * g;
+            d[i + 1] = h + s * (c * g + s * d[i]);
+            for (let k = 0; k < n; k++) {
+              h = V[k][i + 1];
+              V[k][i + 1] = s * V[k][i] + c * h;
+              V[k][i] = c * V[k][i] - s * h;
+            }
+          }
+          p = -s * s2 * c3 * el1 * e[l] / dl1;
+          e[l] = s * p;
+          d[l] = c * p;
+          if (!(Math.abs(e[l]) > eps * tst1)) break;
+        }
+      }
+      d[l] += f;
+      e[l] = 0;
+    }
+    const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => d[b] - d[a]);
     return {
-      values: order.map(i => a[i * n + i]),
-      vectors: Array.from({ length: n }, (_, i) => order.map(j => v[i * n + j])),
+      values: order.map(i => d[i]),
+      vectors: V.map(row => order.map(j => row[j])),
     };
   }
 
@@ -199,7 +283,9 @@
   /** Solve A·X = B for several right-hand sides by elimination with pivoting, or null if A is singular. */
   function solve(A, B) {
     const n = A.length, M = A.map((r, i) => [...r, ...B[i]]);
-    const scale = Math.max(...A.flat().map(Math.abs)) || 1;
+    let scale = 0;
+    for (const row of A) for (const v of row) if (Math.abs(v) > scale) scale = Math.abs(v);
+    scale = scale || 1;
     for (let c = 0; c < n; c++) {
       let best = c;
       for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[best][c])) best = r;
@@ -582,7 +668,7 @@
       out.push(Object.assign(row, {
         specimens, pairs: d.length,
         mean: d.length ? d.reduce((a, b) => a + b, 0) / d.length : null,
-        max: d.length ? Math.max(...d) : null,
+        max: d.length ? extent(d)[1] : null,
       }));
     };
     const seenCurves = new Set();

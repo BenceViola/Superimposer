@@ -6,6 +6,13 @@
 }(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  /** Smallest and largest value, without spreading the list into arguments (which overflows on long lists). */
+  function extent(values) {
+    let lo = Infinity, hi = -Infinity;
+    for (const v of values) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    return [lo, hi];
+  }
+
   const pair = (a, b) => (a < b ? [a, b] : [b, a]);
   const same = (x, y) => x[0] === y[0] && x[1] === y[1];
 
@@ -62,8 +69,9 @@
     const n = points.length;
     if (n < 3) return [];
     const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) || 1;
+    const [xlo, xhi] = extent(xs), [ylo, yhi] = extent(ys);
+    const cx = (xlo + xhi) / 2, cy = (ylo + yhi) / 2;
+    const span = Math.max(xhi - xlo, yhi - ylo) || 1;
     const R = span * 1e5;
     const all = [...points, [cx - 2 * R, cy - R], [cx + 2 * R, cy - R], [cx, cy + 2 * R]];
     const circle = (a, b, c) => {

@@ -6,6 +6,13 @@
 }(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  /** Smallest and largest value, without spreading the list into arguments (which overflows on long lists). */
+  function extent(values) {
+    let lo = Infinity, hi = -Infinity;
+    for (const v of values) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    return [lo, hi];
+  }
+
   const FONT = 'Archivo, Helvetica Neue, Arial, sans-serif';
   const THEMES = {
     light: {
@@ -151,7 +158,7 @@
     const lg = groupLegend(o.groups, W, t, o.rings && o.rings.some(Boolean) ? [ringEntry(t)] : []);
     const m = { l: 62, r: 18, t: 14 + lg.height, b: 50 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
-    const span = v => { const lo = Math.min(...v), hi = Math.max(...v), pad = (hi - lo || Math.abs(hi) || 1) * 0.08; return [lo - pad, hi + pad]; };
+    const span = v => { const [lo, hi] = extent(v), pad = (hi - lo || Math.abs(hi) || 1) * 0.08; return [lo - pad, hi + pad]; };
     let [x0, x1] = span(o.x), [y0, y1] = span(o.y);
     let sx = pw / (x1 - x0), sy = ph / (y1 - y0);
     if (o.equal) {
@@ -228,7 +235,7 @@
     const vals = o.proportion.slice(0, 12);
     const m = { l: 62, r: 18, t: 16, b: 34 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
-    const top = Math.max(...vals) * 1.15;
+    const top = extent(vals)[1] * 1.15;
     const Y = v => m.t + ph - (v / top) * ph;
     let b = '';
     for (const v of niceTicks(0, top, 4)) {
@@ -270,7 +277,7 @@
   /** A scale shared by both directions, with y pointing up. */
   function fitter(points, W, H, m) {
     const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
-    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const [x0, x1] = extent(xs), [y0, y1] = extent(ys);
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const s = Math.min(pw / (x1 - x0 || 1), ph / (y1 - y0 || 1)) * 0.94;
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
@@ -397,9 +404,10 @@
   /** A regular grid around the shape, carried through the warp, as lines of points. */
   function warpedGrid(shape, warp) {
     const xs = shape.map(p => p[0]), ys = shape.map(p => p[1]);
-    const w = Math.max(...xs) - Math.min(...xs) || 1, h = Math.max(...ys) - Math.min(...ys) || 1;
+    const [xlo, xhi] = extent(xs), [ylo, yhi] = extent(ys);
+    const w = xhi - xlo || 1, h = yhi - ylo || 1;
     const pad = 0.15 * Math.max(w, h), cell = (Math.max(w, h) + 2 * pad) / 14;
-    const x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad;
+    const x0 = xlo - pad, y0 = ylo - pad;
     const nx = Math.ceil((w + 2 * pad) / cell), ny = Math.ceil((h + 2 * pad) / cell);
     const STEPS = 6, lines = [];
     for (let i = 0; i <= nx; i++) {
@@ -482,7 +490,7 @@
     const t = o.theme, rows = o.rows.filter(r => r.mean != null).sort((a, b) => b.mean - a.mean);
     const rowH = 24, W = o.width || 640, m = { l: 172, r: 74, t: 26, b: 42 };
     const H = m.t + m.b + rowH * Math.max(1, rows.length);
-    const pw = W - m.l - m.r, top = Math.max(...rows.map(r => r.mean), o.median || 0, 1e-9) * 1.05;
+    const pw = W - m.l - m.r, top = Math.max(extent(rows.map(r => r.mean))[1], o.median || 0, 1e-9) * 1.05;
     const X = v => m.l + (v / top) * pw;
     let b = '';
     for (const v of niceTicks(0, top, 5)) {
