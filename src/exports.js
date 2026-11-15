@@ -103,17 +103,49 @@
     return table(['key', 'point', 'method', ...axes.slice(0, k)], rows);
   }
 
-  function bundle(res, dataset, opts, groups) {
+  /* ---------- groups ---------- */
+  function groupSummaryCSV(stats, units) {
+    return table(['group', 'n', 'mean_centroid_size', 'units', 'procrustes_variance'],
+      stats.groups.map(g => [g.name, g.n, num(g.csize), units || '', g.disparity == null ? '' : num(g.disparity)]));
+  }
+  function groupPairsCSV(stats) {
+    const rows = [], G = stats.groups;
+    const opt = (m, a, b) => (m && m[a][b] != null ? num(m[a][b]) : '');
+    for (let a = 0; a < G.length; a++) for (let b = a + 1; b < G.length; b++) {
+      rows.push([G[a].name, G[b].name, opt(stats.distances, a, b), opt(stats.pDistance, a, b), opt(stats.disparityDiff, a, b), opt(stats.pDisparity, a, b), stats.permutations]);
+    }
+    return table(['group_a', 'group_b', 'procrustes_distance', 'p_distance', 'variance_difference', 'p_variance', 'permutations'], rows);
+  }
+  function groupMeansCSV(stats, res) {
+    const k = res.prep.dim, rows = [];
+    for (const g of stats.groups) g.mean.forEach((p, i) => rows.push([g.name, res.prep.rows[i].id, res.prep.rows[i].label, ...p.map(num)]));
+    return table(['group', 'point', 'label', ...axes.slice(0, k)], rows);
+  }
+  function groupsLine(g) {
+    const n = g.stats.groups.length;
+    const tests = g.stats.permutations ? `${g.stats.permutations} permutations of specimens among groups (as geomorph's pairwise and morphol.disparity)` : 'no permutation tests';
+    return `Groups: ${g.name} (${n} group${n === 1 ? '' : 's'}); ${tests}. Means from the shared superimposition; Procrustes variance around each group's own mean.`
+      + (g.stats.unassigned ? ` ${g.stats.unassigned} specimen${g.stats.unassigned === 1 ? '' : 's'} without a group left out.` : '');
+  }
+
+  function bundle(res, dataset, opts, groups, groupRes) {
     const extra = res.prep.imputedCount ? [{ name: 'imputed.csv', data: imputedCSV(res) }] : [];
+    if (groupRes && groupRes.stats && groupRes.stats.groups.length) {
+      extra.push({ name: 'groups.csv', data: groupSummaryCSV(groupRes.stats, groupRes.units) },
+        { name: 'group-pairs.csv', data: groupPairsCSV(groupRes.stats) },
+        { name: 'group-means.csv', data: groupMeansCSV(groupRes.stats, res) });
+    }
+    let settings = settingsText(res, opts, dataset);
+    if (groupRes && groupRes.stats && groupRes.stats.groups.length) settings += groupsLine(groupRes) + '\n';
     return [...extra,
       { name: 'scores.csv', data: scoresCSV(res, groups) },
       { name: 'aligned-coordinates.csv', data: alignedCSV(res) },
       { name: 'consensus.csv', data: consensusCSV(res) },
       { name: 'eigenvalues.csv', data: eigenCSV(res) },
       { name: 'loadings.csv', data: loadingsCSV(res) },
-      { name: 'settings.txt', data: settingsText(res, opts, dataset) },
+      { name: 'settings.txt', data: settings },
     ];
   }
 
-  return { imputedCSV, METHOD_NAMES, scoresCSV, alignedCSV, consensusCSV, eigenCSV, loadingsCSV, repeatabilityCSV, settingsText, bundle };
+  return { groupSummaryCSV, groupPairsCSV, groupMeansCSV, groupsLine, imputedCSV, METHOD_NAMES, scoresCSV, alignedCSV, consensusCSV, eigenCSV, loadingsCSV, repeatabilityCSV, settingsText, bundle };
 }));

@@ -159,7 +159,9 @@
     const m = { l: 62, r: 18, t: 14 + lg.height, b: 50 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const span = v => { const [lo, hi] = extent(v), pad = (hi - lo || Math.abs(hi) || 1) * 0.08; return [lo - pad, hi + pad]; };
-    let [x0, x1] = span(o.x), [y0, y1] = span(o.y);
+    const ellPts = [];
+    for (const e of o.ellipses || []) if (e && e.points) for (const q of e.points) ellPts.push(q);
+    let [x0, x1] = span(o.x.concat(ellPts.map(q => q[0]))), [y0, y1] = span(o.y.concat(ellPts.map(q => q[1])));
     let sx = pw / (x1 - x0), sy = ph / (y1 - y0);
     if (o.equal) {
       const s = Math.min(sx, sy);
@@ -190,6 +192,11 @@
         b += `<polygon class="hull" points="${convexHull(pts).map(p => `${f(p[0])},${f(p[1])}`).join(' ')}" fill="${c}" fill-opacity="0.08" stroke="${c}" stroke-opacity="0.6" stroke-width="1.25"/>`;
       });
     }
+    for (const e of o.ellipses || []) {
+      if (!e || !e.points) continue;
+      const c = colourOf(t, e.g);
+      b += `<polygon class="ellipse" points="${e.points.map(q => `${f(X(q[0]))},${f(Y(q[1]))}`).join(' ')}" fill="${c}" fill-opacity="0.06" stroke="${c}" stroke-width="1.5" stroke-dasharray="5 3"/>`;
+    }
     const labels = [];
     o.x.forEach((v, i) => {
       const px = X(v), py = Y(o.y[i]);
@@ -214,6 +221,10 @@
       if (!o.rings || !o.rings[i]) return;
       b += `<circle class="imputed-ring" cx="${f(X(v))}" cy="${f(Y(o.y[i]))}" r="9.5" fill="none" stroke="${t.ink}" stroke-width="1.25" stroke-dasharray="2.5 2"/>`;
     });
+    for (const gm of o.groupMeans || []) {
+      const name = o.groups && o.groups.levels[gm.g] != null ? o.groups.levels[gm.g] : '';
+      b += `<g class="group-centre"><title>Mean of ${esc(name)}</title>${marker(gm.g, X(gm.x), Y(gm.y), 10, `fill="${colourOf(t, gm.g)}" stroke="${t.ink}" stroke-width="2"`)}</g>`;
+    }
     for (const v of o.virtual || []) {
       const px = X(v.x), py = Y(v.y), c = 6;
       b += `<g class="virtual"><path d="M${f(px - c)} ${f(py - c)}L${f(px + c)} ${f(py + c)}M${f(px - c)} ${f(py + c)}L${f(px + c)} ${f(py - c)}" stroke="${t.ink}" stroke-width="2"/>`
@@ -439,7 +450,7 @@
     const items = [
       lines
         ? { label: 'Deformation grid', mark: (x, y) => `<path d="M${x - 5} ${y - 3}h10M${x - 5} ${y + 3}h10M${x - 2.5} ${y - 6}v12M${x + 2.5} ${y - 6}v12" stroke="${t.muted}" fill="none"/>` }
-        : { label: 'Mean shape', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4" fill="none" stroke="${t.muted}" stroke-width="1.5"/>` },
+        : { label: o.fromLabel || 'Mean shape', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4" fill="none" stroke="${t.muted}" stroke-width="1.5"/>` },
       { label: o.targetLabel || 'Target', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4.5" fill="${colour}"/>` },
     ];
     if (o.imputed && o.imputed.length) items.push(imputedEntry(t));
@@ -474,7 +485,48 @@
       if (o.labels !== false && !curve && mean.length <= 40) b += `<text x="${f(x1 + 7)}" y="${f(y1 - 7)}" fill="${t.ink}">${esc(o.rows[i].id)}</text>`;
     });
     b += imputedRings((o.imputed || []).map(j => [0, j]), [target], place, t);
-    return frame(W, H, t, `Shape change from the mean to ${o.targetLabel || 'the target'}`, b);
+    return frame(W, H, t, `Shape change from ${o.fromLabel || 'the mean'} to ${o.targetLabel || 'the target'}`, b);
+  }
+
+  /** Group means on top of each other in the group colours, optionally with the mean of all specimens in grey. */
+  function groupMeans(o) {
+    const W = o.width || 560, H = o.height || 460, t = o.theme;
+    const sets = o.means.map(c => project(c, o.view));
+    const overall = o.overall ? project(o.overall, o.view) : null;
+    const items = o.names.map((label, k) => ({ label, mark: (x, y) => marker(o.levels[k], x, y, 5, `fill="${colourOf(t, o.levels[k])}"`) }));
+    if (overall) items.push({ label: 'All specimens', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="4" fill="none" stroke="${t.muted}" stroke-width="1.5"/>` });
+    const lg = legend(items, W, t, true);
+    const all = [];
+    for (const c of sets) for (const p of c) all.push(p);
+    if (overall) for (const p of overall) all.push(p);
+    const place = fitter(all, W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
+    let b = lg.svg;
+    if (overall) {
+      if (hasLinks(o)) b += `<path class="wire-overall" d="${linkPath([overall], o.links, place)}" fill="none" stroke="${t.muted}" stroke-width="1.25" stroke-dasharray="3 3"/>`;
+      for (const p of overall) { const [x, y] = place(p); b += `<circle class="overall-pt" cx="${f(x)}" cy="${f(y)}" r="3.5" fill="none" stroke="${t.muted}" stroke-width="1.25"/>`; }
+    }
+    sets.forEach((c, k) => {
+      const g = o.levels[k], col = colourOf(t, g);
+      b += `<g class="group-mean" data-group="${esc(o.names[k])}">`;
+      for (const chain of curveChains(o.rows)) b += polyline(chain.map(i => place(c[i])), 'curve-line', `stroke="${col}" stroke-width="1.75"`);
+      if (hasLinks(o)) b += `<path class="wire-group" d="${linkPath([c], o.links, place)}" fill="none" stroke="${col}" stroke-width="1.75" stroke-opacity="0.85"/>`;
+      c.forEach((p, i) => {
+        const [x, y] = place(p), curve = o.rows[i].type === 'curve';
+        b += `<g class="gm-pt"><title>${esc(o.names[k])} · ${esc(o.rows[i].id)}</title>${marker(g, x, y, curve ? 2.5 : 4.5, `fill="${col}" stroke="${t.surface}" stroke-width="1"`)}</g>`;
+      });
+      b += '</g>';
+    });
+    const labelled = o.labels !== false && o.rows.filter(r => r.type !== 'curve').length <= 40;
+    if (labelled && sets.length) {
+      const ref = overall || sets[0];
+      ref.forEach((p, i) => {
+        if (o.rows[i].type === 'curve') return;
+        let x = 0, y = 0;
+        for (const c of sets) { const q = place(c[i]); x += q[0] / sets.length; y += q[1] / sets.length; }
+        b += `<text x="${f(x + 9)}" y="${f(y - 9)}" fill="${t.ink}" font-weight="600">${esc(o.rows[i].id)}</text>`;
+      });
+    }
+    return frame(W, H, t, `Mean shapes of ${o.names.join(', ')}`, b);
   }
 
   /** Up to a few shapes in one figure: one large, more in two columns (one on a narrow screen). */
@@ -525,5 +577,5 @@
     return frame(W, H, t, 'Mean distance between replicates per landmark', b);
   }
 
-  return { THEMES, MAX_LEVELS, MARKER_NAMES, resolveStyles, colourValue, markerIcon, pixelToData, shapeGrid, niceTicks, scatter, scree, project, turnView, rawData, superimposition, shapeChange, repeatabilityBars };
+  return { THEMES, MAX_LEVELS, MARKER_NAMES, groupMeans, resolveStyles, colourValue, markerIcon, pixelToData, shapeGrid, niceTicks, scatter, scree, project, turnView, rawData, superimposition, shapeChange, repeatabilityBars };
 }));
