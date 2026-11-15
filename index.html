@@ -27,6 +27,7 @@
     </div>
     <input type="file" id="fData" accept=".json,.tps,.txt,.zip,application/json,application/zip,text/plain" multiple hidden>
     <input type="file" id="fPairs" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
+    <input type="file" id="fSliders" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
     <input type="file" id="fLinks" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
     <input type="file" id="fGroups" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
   </header>
@@ -103,7 +104,26 @@
             <option value="average">Average per specimen</option>
           </select>
         </label>
-        <label class="check" id="semiRow"><input type="checkbox" id="chkSemi"> Include semilandmarks (not slid)</label>
+        <label class="field" id="semiRow">Semilandmarks
+          <select id="selSemi">
+            <option value="fixed">Treat as fixed landmarks</option>
+            <option value="slide">Slide along their curves</option>
+            <option value="omit">Leave out</option>
+          </select>
+        </label>
+        <div class="sub-opts" id="slideOpts" hidden>
+          <label class="field">Slide to minimise
+            <select id="selSlide">
+              <option value="be">Bending energy</option>
+              <option value="procd">Procrustes distance</option>
+            </select>
+          </label>
+          <div class="pairs">
+            <span class="hint" id="slidersInfo"></span>
+            <button class="btn sm" id="bLoadSliders" type="button" title="A CSV with three columns (before, slide, after), as geomorph's curves matrix: row numbers or point ids">Load sliders</button>
+            <button class="btn sm" id="bClearSliders" type="button">Remove</button>
+          </div>
+        </div>
         <h3>Display</h3>
         <label class="field">Colour by
           <select id="selColour"><option value="">Nothing</option></select>
@@ -167,6 +187,7 @@
           <div class="plot-head">
             <button class="btn primary" id="bFit" type="button">Run Procrustes fit</button>
             <p class="hint grow" id="superHint"></p>
+            <label class="check" id="beforeRow" hidden><input type="checkbox" id="chkBefore"> Show points before sliding</label>
             <div class="exports"><button class="btn sm" data-export="svg" data-plot="super" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="super" type="button">PNG</button></div>
           </div>
           <div class="plot" id="plotSuper"></div>

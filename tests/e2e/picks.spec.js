@@ -5,7 +5,7 @@ const { openApp, loadExample, loadRaw, upload, tps3d, fit, expect } = require('.
 
 const pick = (page, i) => page.locator('#plotScatter .pt').nth(i).dispatchEvent('click');
 const morpho = async page => { await loadExample(page); await page.click('[data-tab="morpho"]'); };
-const P = 10; // fixed landmarks in the example
+const P = 15; // landmarks and semilandmarks in the example
 
 /** Screen position inside the plot, well away from every specimen. */
 const emptySpot = page => page.evaluate(() => {
@@ -111,7 +111,7 @@ test('a theoretical shape goes away when the analysis changes', async ({ page })
   await morpho(page);
   const [x, y] = await emptySpot(page);
   await page.mouse.click(x, y);
-  await page.check('#chkSemi');
+  await page.selectOption('#selSemi', 'omit');
   await expect(page.locator('#pickChips li')).toHaveCount(0);
 });
 

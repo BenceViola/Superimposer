@@ -126,6 +126,7 @@
   }
 
   const imputedEntry = t => ({ label: 'Imputed landmark', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="5" fill="none" stroke="${t.warn}" stroke-width="2"/>` });
+  const beforeEntry = t => ({ label: 'Before sliding', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="3.5" fill="none" stroke="${t.muted}" stroke-width="1.25"/>` });
   const ringEntry = t => ({ label: 'Has imputed landmarks', mark: (x, y) => `<circle cx="${x}" cy="${y}" r="5.5" fill="none" stroke="${t.ink}" stroke-width="1.25" stroke-dasharray="2 2"/>` });
   /** Rings around imputed landmarks: pairs of [specimen, point]. */
   function imputedRings(list, sets, place, t) {
@@ -391,11 +392,26 @@
 
   function superimposition(o) {
     const W = o.width || 640, H = o.height || 520, t = o.theme;
-    const lg = groupLegend(o.groups, W, t, o.imputed && o.imputed.length ? [imputedEntry(t)] : []);
+    const showBefore = o.before && o.beforeRows && o.beforeRows.length;
+    const extras = (o.imputed && o.imputed.length ? [imputedEntry(t)] : []).concat(showBefore ? [beforeEntry(t)] : []);
+    const lg = groupLegend(o.groups, W, t, extras);
     const aligned = o.aligned.map(c => project(c, o.view));
     const cons = project(o.consensus, o.view);
-    const place = fitter([...aligned.flat(), ...cons], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
-    let b = lg.svg + clouds(aligned, paintList(o, t), place, o.maxPoints);
+    const before = showBefore ? o.before.map(c => o.beforeRows.map(i => project([c[i]], o.view)[0])) : [];
+    let pts = aligned.flat().concat(cons);
+    for (const c of before) pts = pts.concat(c);
+    const place = fitter(pts, W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
+    let b = lg.svg;
+    if (showBefore) {
+      const step = o.maxPoints && before.length * o.beforeRows.length > o.maxPoints ? Math.ceil((before.length * o.beforeRows.length) / o.maxPoints) : 1;
+      let n = 0;
+      for (const c of before) for (const p of c) {
+        if (n++ % step) continue;
+        const [x, y] = place(p);
+        b += `<circle class="before-slide" cx="${f(x)}" cy="${f(y)}" r="2.5" fill="none" stroke="${t.muted}" stroke-width="1"/>`;
+      }
+    }
+    b += clouds(aligned, paintList(o, t), place, o.maxPoints);
     for (const chain of curveChains(o.rows)) b += polyline(chain.map(i => place(cons[i])), 'curve-line', `stroke="${t.ink}" stroke-width="1.5" stroke-opacity="0.75"`);
     if (hasLinks(o)) b += `<path class="wire" d="${linkPath([cons], o.links, place)}" fill="none" stroke="${t.ink}" stroke-width="1.5"/>`;
     const chosen = selectedKeys(o);

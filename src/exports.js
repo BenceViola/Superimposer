@@ -74,7 +74,9 @@
       `Superimposer ${VERSION}`,
       '',
       `Analysed: ${prep.specimens.length} specimens, ${prep.rows.length} points, ${prep.dim}D.`,
-      `Superimposition: generalised Procrustes (full iteration), projected to tangent space, consensus on its principal axes.`,
+      res.gpa.slideIterations
+        ? `Superimposition: generalised Procrustes with sliding semilandmarks, step for step as geomorph's gpagen (alignment and sliding in turns), projected to tangent space, consensus on its principal axes.`
+        : `Superimposition: generalised Procrustes (full iteration), projected to tangent space, consensus on its principal axes.`,
       `PCA: on tangent coordinates, ${res.pca.values.length} components.`,
       `Coordinates: y points up; 2D landmark-json files were flipped to match TPS.`,
       `Units for centroid size: ${dataset.units}.`,

@@ -105,10 +105,10 @@ test('settings change the analysis', async ({ page }) => {
   const used = () => page.evaluate(() => window.__sup.S.res.prep.rows.length);
   const count = () => page.evaluate(() => window.__sup.S.res.prep.specimens.length);
   const p = await used(), n = await count();
-  await page.check('#chkSemi');
-  expect(await used()).toBeGreaterThan(p);
   await expect(page.locator('#issues')).toContainText('not slid');
-  await page.uncheck('#chkSemi');
+  await page.selectOption('#selSemi', 'omit');
+  expect(await used()).toBeLessThan(p);
+  await page.selectOption('#selSemi', 'fixed');
   await page.selectOption('#selReplicates', 'average');
   expect(await count()).toBeLessThan(n);
 });
@@ -257,7 +257,7 @@ test('distances wait for the fit', async ({ page }) => {
 test('changing a setting keeps the fit', async ({ page }) => {
   await openApp(page);
   await loadExample(page);
-  await page.check('#chkSemi');
+  await page.selectOption('#selSemi', 'slide');
   await expect(page.locator('#plotSuper .consensus').first()).toBeVisible();
 });
 

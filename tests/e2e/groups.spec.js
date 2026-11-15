@@ -3,7 +3,7 @@ const { test } = require('@playwright/test');
 const fs = require('node:fs');
 const { openApp, loadExample, loadRaw, upload, tps3d, expect } = require('./helpers.js');
 
-const P = 10; // fixed landmarks in the example
+const P = 15; // landmarks and semilandmarks in the example
 const row = (page, i) => page.locator('#dataTable tbody tr[data-key]').nth(i).locator('td.f3');
 const groupsTab = async (page, colour = 'csv:form') => {
   await loadExample(page);

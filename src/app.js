@@ -14,7 +14,7 @@
   const S = {
     all: [], warnings: [], refused: [], confirmTps: false, table: null,
     dataset: null, res: null, repeat: null,
-    missing: 'specimens', replicates: 'all', semilandmarks: false,
+    missing: 'specimens', replicates: 'all', semilandmarks: 'fixed', slide: 'be', sliders: [], slidersFile: '', slidersReport: '', showBefore: false,
     dataVersion: 0, assembledFrom: null, assembledTps: false, resKey: null, dragging: false,
     impute: { method: 'none', mirrorFirst: false, max: 3, notDone: false, ref: '' }, pairs: [], pairsFile: '',
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
@@ -41,7 +41,11 @@
     }
     return { method: m.method, mirrorFirst: m.mirrorFirst, max: m.max, notDone: m.notDone, pairs: pairsNow(), groupOf, groupName: m.ref || undefined };
   }
-  const optsNow = () => ({ impute: imputeNow(), missing: S.missing, replicates: S.replicates, semilandmarks: S.semilandmarks, flip: S.flip, excludeSpecimens: S.excludeSpecimens, excludePoints: S.excludePoints });
+  /** Sliders: loaded from a file, otherwise from the template's curves. */
+  const templateSlidersNow = () => (S.dataset ? IO.templateSliders(S.dataset.rows, S.dataset.curves) : []);
+  const slidersNow = () => (S.sliders.length ? S.sliders : templateSlidersNow());
+  const optsNow = () => ({ impute: imputeNow(), missing: S.missing, replicates: S.replicates, semilandmarks: S.semilandmarks,
+    slide: S.semilandmarks === 'slide' ? S.slide : undefined, sliders: S.semilandmarks === 'omit' || S.semilandmarks === 'slide' ? slidersNow() : undefined, flip: S.flip, excludeSpecimens: S.excludeSpecimens, excludePoints: S.excludePoints });
   const theme = () => {
     const forced = document.documentElement.dataset.theme;
     const dark = forced ? forced === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -94,6 +98,14 @@
   const storeKey = sig => `superimposer:links:${sig}`;
   const styleKey = sig => `superimposer:styles:${sig}`;
   const groupKey = sig => `superimposer:groups:${sig}`;
+  const slidersKey = sig => `superimposer:sliders:${sig}`;
+  function writeSliders() {
+    try {
+      if (!S.linkSig) return;
+      if (S.sliders.length) localStorage.setItem(slidersKey(S.linkSig), JSON.stringify({ sliders: S.sliders, file: S.slidersFile }));
+      else localStorage.removeItem(slidersKey(S.linkSig));
+    } catch { /* storage unavailable */ }
+  }
   const pairsKey = sig => `superimposer:pairs:${sig}`;
   function writePairs() {
     if (!S.linkSig) return;
@@ -119,6 +131,7 @@
     links: isPairList,
     styles: v => isObject(v) && Object.values(v).every(isObject),
     pairs: v => isObject(v) && isPairList(v.pairs) && (v.file == null || typeof v.file === 'string'),
+    sliders: v => isObject(v) && Array.isArray(v.sliders) && v.sliders.every(t => Array.isArray(t) && t.length === 3 && t.every(x => typeof x === 'string')) && (v.file == null || typeof v.file === 'string'),
     table: v => isObject(v) && Array.isArray(v.columns) && v.columns.length > 0 && v.columns.every(c => typeof c === 'string')
       && Array.isArray(v.rows) && v.rows.every(isObject),
   };
@@ -146,6 +159,11 @@
     const storedPairs = sig ? readJson(pairsKey(sig), null, VALID.pairs) : null;
     S.pairs = storedPairs ? storedPairs.pairs : [];
     S.pairsFile = storedPairs ? storedPairs.file : '';
+    const storedSliders = sig ? readJson(slidersKey(sig), null, VALID.sliders) : null;
+    const known = new Set(S.dataset ? S.dataset.rows.map(r => r.id) : []);
+    S.sliders = storedSliders && storedSliders.sliders.every(t => t.every(id => known.has(id))) ? storedSliders.sliders : [];
+    S.slidersFile = S.sliders.length ? storedSliders.file || '' : '';
+    S.slidersReport = '';
     if (sig && !S.table) {
       S.table = readJson(groupKey(sig), null, VALID.table);
       if (S.table) S.tableReport = 'Group columns remembered from your last session in this browser.';
@@ -243,7 +261,7 @@
 
   /* ---------- data table ---------- */
   const groupColumns = () => (S.table ? S.table.columns.filter(c => c !== TB.idColumn(S.table)) : []);
-  const pointColumns = () => S.dataset.rows.map((r, at) => Object.assign({}, r, { at })).filter(r => r.type !== 'curve' || S.semilandmarks);
+  const pointColumns = () => S.dataset.rows.map((r, at) => Object.assign({}, r, { at })).filter(r => r.type !== 'curve' || S.semilandmarks !== 'omit');
   function visibleRows() {
     const all = TB.buildRows(S.dataset, S.res, S.table, S.excludeSpecimens, { fitted: S.fitted, semilandmarks: S.semilandmarks });
     const shown = TB.filterRows(all, S.dtFilter);
@@ -535,12 +553,17 @@
         notes.push(`${plural(prep.imputedCount, 'landmark')} imputed in ${plural(k, 'specimen')} by ${EX.METHOD_NAMES[prep.impute.method]}${prep.impute.mirrorFirst && prep.impute.method !== 'mirror' ? ' (after mirroring)' : ''}. Ringed in the figures.`);
         for (const x of prep.imputeNotes) notes.push(`<span class="mono">${esc(x.key)}</span>: ${esc(x.reason)}`);
       }
-      if (prep.semilandmarksUsed) notes.push(`${plural(prep.semilandmarksUsed, 'semilandmark')} included but not slid, so treat the results as exploratory.`);
-      else if (prep.semilandmarksAvailable) notes.push(`${plural(prep.semilandmarksAvailable, 'semilandmark')} left out. They need sliding, which comes later.`);
+      const slidN = S.res && S.res.ok && S.res.gpa.sliders ? S.res.gpa.sliders.length : 0;
+      if (slidN) notes.push(`${plural(slidN, 'semilandmark')} slid by ${S.res.gpa.slide === 'procd' ? 'Procrustes distance' : 'bending energy'} (${S.res.gpa.slideIterations} rounds, as geomorph).`);
+      else if (prep.semilandmarks === 'slide' && prep.semilandmarksUsed) notes.push('No semilandmark slides: there are no sliders. They come from the template’s curves, or load a sliders file.');
+      else if (prep.semilandmarksUsed) notes.push(`${plural(prep.semilandmarksUsed, 'semilandmark')} treated as fixed landmarks (not slid).`);
+      else if (prep.semilandmarksAvailable) notes.push(`${plural(prep.semilandmarksAvailable, 'semilandmark')} left out.`);
+      for (const x of prep.sliderNotes || []) notes.push(esc(x));
     }
     if (d.units === 'px') notes.push('Coordinates are in pixels, so centroid sizes are only comparable at equal magnification.');
     if (S.tableReport) notes.push(S.tableReport);
     if (S.linkReport) notes.push(esc(S.linkReport));
+    if (S.slidersReport) notes.push(esc(S.slidersReport));
     $('issuesCard').hidden = !notes.length;
     $('issues').innerHTML = notes.map(n => `<li>${n}</li>`).join('');
 
@@ -580,8 +603,14 @@
     $('chkNotDone').checked = imp.notDone;
     $('missingLabel').textContent = imputing ? 'Landmarks not imputed' : 'Missing landmarks';
     $('selReplicates').value = S.replicates;
-    $('semiRow').hidden = !d.rows.some(r => r.type === 'curve');
-    $('chkSemi').checked = S.semilandmarks;
+    $('selSemi').value = S.semilandmarks;
+    $('slideOpts').hidden = S.semilandmarks !== 'slide';
+    $('selSlide').value = S.slide;
+    const slidersFromTemplate = templateSlidersNow().length;
+    $('slidersInfo').textContent = S.sliders.length
+      ? `${plural(S.sliders.length, 'slider')} loaded${S.slidersFile ? ` from ${S.slidersFile}` : ''}${slidersFromTemplate ? ' (instead of the template’s)' : ''}.`
+      : slidersFromTemplate ? `${plural(slidersFromTemplate, 'slider')} from the template’s curves.` : 'No sliders: the data have no curves. Load a sliders file (before, slide, after), as for geomorph.';
+    $('bClearSliders').hidden = !S.sliders.length;
     const options = colourOptions();
     if (S.colour && !options.some(o => o.value === S.colour)) S.colour = '';
     $('selColour').innerHTML = '<option value="">Nothing</option>' + options.map(o => {
@@ -708,7 +737,7 @@
     return {
       super: (theme_, extra) => (!S.fitted
         ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, styles, selected, view, links, imputed, maxPoints: S.dragging ? DRAG_POINTS : undefined, theme: theme_ }, extra))
-        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, styles, selected, view, labels: S.labels, links, imputed, maxPoints: S.dragging ? DRAG_POINTS : undefined, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
+        : PL.superimposition(Object.assign({ before: S.showBefore && res.unslid ? res.unslid : undefined, beforeRows: res.gpa.sliders ? res.gpa.sliders.map(t => t[1]) : undefined, aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, styles, selected, view, labels: S.labels, links, imputed, maxPoints: S.dragging ? DRAG_POINTS : undefined, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
       groupMeans: (theme_, extra) => {
         const info = groupInfo();
         if (!info) return '';
@@ -861,6 +890,8 @@
     $('plotSuper').classList.toggle('turn', is3D);
     $('plotShape').classList.toggle('turn', is3D);
     $('bFit').textContent = S.fitted ? 'Show raw data' : 'Run Procrustes fit';
+    $('beforeRow').hidden = !(S.fitted && res.unslid);
+    $('chkBefore').checked = S.showBefore;
     $('superHint').textContent = S.editingLinks ? 'Click a landmark, then the next, to draw lines. Click the same landmark again to stop. Linking a joined pair removes the line.' : (S.fitted
       ? `${plural(res.prep.specimens.length, 'specimen')} aligned; the large points are the consensus.`
       : `${plural(res.prep.specimens.length, 'specimen')} as digitised (${unitWord(S.dataset.units)}, y up), before any alignment.`) + (is3D && !S.editingLinks ? ' Drag to turn.' : '');
@@ -1202,7 +1233,22 @@
     rerun();
   });
   bindChange('selReplicates', t => { S.replicates = t.value; });
-  bindChange('chkSemi', t => { S.semilandmarks = t.checked; });
+  bindChange('selSemi', t => { S.semilandmarks = t.value; });
+  bindChange('selSlide', t => { S.slide = t.value; });
+  on($('chkBefore'), 'change', e => { S.showBefore = e.target.checked; render(); });
+  on($('bLoadSliders'), 'click', () => $('fSliders').click());
+  on($('bClearSliders'), 'click', () => { S.sliders = []; S.slidersFile = ''; S.slidersReport = ''; writeSliders(); rerun(); });
+  on($('fSliders'), 'change', async e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f || !S.dataset) return;
+    const r = IO.parseSliders(await f.text(), S.dataset.rows);
+    S.sliders = r.sliders;
+    S.slidersFile = r.sliders.length ? f.name : '';
+    S.slidersReport = r.errors.length ? `${f.name}: ${plural(r.errors.length, 'line')} not used: ${r.errors.slice(0, 6).join(' ')}${r.errors.length > 6 ? ' …' : ''}` : '';
+    writeSliders();
+    rerun();
+  });
   bindChange('selColour', t => { S.colour = t.value; });
   bindChange('chkLabels', t => { S.labels = t.checked; });
   bindChange('chkHulls', t => { S.hulls = t.checked; });
