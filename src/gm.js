@@ -185,7 +185,7 @@
   /* ---------- GPA ---------- */
   /** Rotate everything so the consensus lies on its principal axes (as gpagen's PrinAxes). */
   function principalAxes(aligned) {
-    const M = meanOf(aligned), k = M[0].length;
+    const M = centre(meanOf(aligned)), k = M[0].length;
     const cov = Array.from({ length: k }, (_, a) => Array.from({ length: k }, (_, b) => M.reduce((s, p) => s + p[a] * p[b], 0)));
     const V = symEig(cov).vectors;
     for (let j = 0; j < k; j++) if (V[j][j] < 0) for (let i = 0; i < k; i++) V[i][j] = -V[i][j];
@@ -199,6 +199,7 @@
 
   function gpa(matrix, opts) {
     opts = opts || {};
+    if (opts.sliders && opts.sliders.length) return slidingGpa(matrix, opts);
     const tol = opts.tol || 1e-13, maxIter = opts.maxIter || 200;
     const csize = matrix.map(centroidSize);
     let aligned = matrix.map(normalise);
@@ -223,6 +224,133 @@
     });
     const procD = tangent.map(c => distance(c, consensus));
     return { aligned, tangent, consensus, csize, procD, iterations, converged };
+  }
+
+  /* ---------- sliding semilandmarks ---------- */
+  const csScale = c => scaled(c, 1 / centroidSize(c)); // geomorph's cs.scale: scaled, not centred
+
+  /** Bending-energy matrix of a configuration (top-left block of the inverted thin-plate spline matrix, as geomorph's Ltemplate). */
+  function bendingEnergy(ref) {
+    const p = ref.length, k = ref[0].length, n = p + k + 1;
+    const L = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 0; i < p; i++) {
+      for (let j = i + 1; j < p; j++) {
+        let r2 = 0;
+        for (let d = 0; d < k; d++) r2 += (ref[i][d] - ref[j][d]) ** 2;
+        const r = Math.sqrt(r2), u = r > 0 ? (k === 2 ? r2 * Math.log(r) : r) : 0;
+        L[i][j] = L[j][i] = u;
+      }
+      const q = [1].concat(ref[i]);
+      for (let c = 0; c <= k; c++) { L[i][p + c] = q[c]; L[p + c][i] = q[c]; }
+    }
+    const I = Array.from({ length: n }, (_, i) => Array.from({ length: p }, (_, j) => (i === j ? 1 : 0)));
+    const inv = solve(L, I);
+    if (!inv) throw new Error('Two or more points of the mean shape are in the same place, so the semilandmarks can’t slide by bending energy. Try sliding by Procrustes distance.');
+    return inv.slice(0, p);
+  }
+
+  /** Solves A x = b for symmetric positive definite A (Cholesky); null if A isn't. */
+  function cholSolve(A, b) {
+    const n = A.length, Lo = Array.from({ length: n }, () => new Float64Array(n));
+    for (let i = 0; i < n; i++) {
+      const Li = Lo[i], Ai = A[i];
+      for (let j = 0; j <= i; j++) {
+        const Lj = Lo[j];
+        let s = Ai[j];
+        for (let m = 0; m < j; m++) s -= Li[m] * Lj[m];
+        if (i === j) { if (!(s > 1e-300)) return null; Li[i] = Math.sqrt(s); } else Li[j] = s / Lj[j];
+      }
+    }
+    const y = new Float64Array(n);
+    for (let i = 0; i < n; i++) { let s = b[i]; for (let m = 0; m < i; m++) s -= Lo[i][m] * y[m]; y[i] = s / Lo[i][i]; }
+    const x = new Float64Array(n);
+    for (let i = n - 1; i >= 0; i--) { let s = y[i]; for (let m = i + 1; m < n; m++) s -= Lo[m][i] * x[m]; x[i] = s / Lo[i][i]; }
+    return x;
+  }
+
+  /**
+   * One specimen's semilandmarks slid along their tangents (from the neighbour before to the one after),
+   * minimising bending energy (L given) or Procrustes distance (L null) to ref; as geomorph's semilandmarks.slide.BE / .ProcD.
+   */
+  function slideOnce(y, ref, sliders, L) {
+    const s = sliders.length, k = y[0].length;
+    const idx = sliders.map(t => t[1]);
+    const tans = sliders.map(([b, , a]) => {
+      const v = y[a].map((v_, d) => v_ - y[b][d]);
+      const len = Math.sqrt(v.reduce((q, x) => q + x * x, 0));
+      return len > 0 ? v.map(x => x / len) : v.map(() => 0);
+    });
+    const yc = y.map((p, i) => p.map((v, d) => v - ref[i][d]));
+    let lambda;
+    if (!L) lambda = idx.map((i, a) => tans[a].reduce((q, t, d) => q + t * yc[i][d], 0));
+    else {
+      const A = Array.from({ length: s }, () => new Float64Array(s)), rhs = new Float64Array(s);
+      for (let a = 0; a < s; a++) {
+        const La = L[idx[a]], ta = tans[a];
+        for (let b = 0; b <= a; b++) {
+          let dot = 0;
+          for (let d = 0; d < k; d++) dot += ta[d] * tans[b][d];
+          A[a][b] = A[b][a] = dot * La[idx[b]];
+        }
+        let r = 0;
+        for (let j = 0; j < y.length; j++) { const w = La[j]; if (w) for (let d = 0; d < k; d++) r += ta[d] * w * yc[j][d]; }
+        rhs[a] = r;
+      }
+      lambda = cholSolve(A, rhs);
+      if (!lambda) {
+        const x = solve(Array.from(A, r => Array.from(r)), Array.from(rhs, v => [v]));
+        if (!x) throw new Error('The semilandmarks can’t slide: their neighbours don’t define a direction (are two neighbours in the same place?).');
+        lambda = x.map(r => r[0]);
+      }
+    }
+    const out = y.map(p => p.slice());
+    idx.forEach((i, a) => { for (let d = 0; d < k; d++) out[i][d] -= tans[a][d] * lambda[a]; });
+    return out;
+  }
+
+  /**
+   * Procrustes fit with sliding semilandmarks, step for step as geomorph's gpagen(curves = ...):
+   * align to the first specimen, then slide and rotate in turns (by default at most 10 rounds, tolerance 1e-4),
+   * principal axes, tangent projection. Sliders: [before, slide, after] as row positions.
+   */
+  function slidingGpa(matrix, opts) {
+    const sliders = opts.sliders, be = opts.slide !== 'procd';
+    const maxIter = opts.slideMaxIter || 10, tol = opts.slideTol == null ? 1e-4 : opts.slideTol;
+    const n = matrix.length, p = matrix[0].length, k = matrix[0][0].length;
+    const csize = matrix.map(centroidSize);
+    let slid0 = matrix.map(normalise);
+    const first = csScale(slid0[0]);
+    slid0 = slid0.map(c => rotateOnto(first, c));
+    let ref = meanOf(slid0);
+    const sumSq = list => {
+      let s = 0;
+      for (let i = 0; i < p; i++) for (let d = 0; d < k; d++) { let t = 0; for (const c of list) t += c[i][d]; s += t * t; }
+      return s / n;
+    };
+    let ss0 = sumSq(slid0), Q = ss0, iter = 1;
+    while (Q > tol) {
+      iter++;
+      const L = be ? bendingEnergy(ref) : null;
+      const slid = slid0.map(y => slideOnce(y, ref, sliders, L));
+      const ss = sumSq(slid);
+      const target = csScale(ref);
+      slid0 = slid.map(y => rotateOnto(target, y));
+      ref = csScale(meanOf(slid0));
+      Q = Math.abs(ss0 - ss);
+      ss0 = ss;
+      if (iter >= maxIter) break;
+    }
+    const aligned = principalAxes(slid0);
+    const consensus = normalise(meanOf(aligned));
+    const yv = consensus.flat();
+    const tangent = aligned.map(c => {
+      const x = c.flat(), dot = x.reduce((q, v, i) => q + v * yv[i], 0);
+      const z = x.map((v, i) => v - dot * yv[i] + yv[i]);
+      return c.map((pt, i) => pt.map((_, d) => z[i * k + d]));
+    });
+    const centreOfAll = meanOf(tangent); // sliding leaves the configurations slightly off centre, as in geomorph
+    const procD = tangent.map(c => distance(c, centreOfAll));
+    return { aligned, tangent, consensus, csize, procD, iterations: iter + 1, converged: Q <= tol, slide: be ? 'be' : 'procd', slideIterations: iter + 1, sliders };
   }
 
   /* ---------- PCA ---------- */
@@ -566,9 +694,12 @@
       });
     });
 
+    const semi = opts.semilandmarks === true ? 'fixed' : opts.semilandmarks === false ? 'omit' : opts.semilandmarks || 'fixed';
+    const slideIds = new Set((opts.sliders || []).map(t => t[1]));
+    const isSemi = r => r.type === 'curve' || slideIds.has(r.id);
     let use = dataset.rows.map((r, i) => i).filter(i => {
       const r = dataset.rows[i];
-      return !noPt.has(r.id) && (r.type !== 'curve' || opts.semilandmarks);
+      return !noPt.has(r.id) && (semi !== 'omit' || !isSemi(r));
     });
     // Imputation comes first; gaps it leaves follow the missing-data choice below.
     const imp = opts.impute && opts.impute.method && opts.impute.method !== 'none' ? opts.impute : null;
@@ -610,7 +741,17 @@
         return !zero;
       });
     }
-    const curveRows = dataset.rows.filter(r => r.type === 'curve').length;
+    const curveRows = dataset.rows.filter(isSemi).length;
+    const sliders = [], sliderNotes = [];
+    if (semi === 'slide') {
+      const at = new Map(use.map((row, j) => [dataset.rows[row].id, j]));
+      for (const t of opts.sliders || []) {
+        if (!at.has(t[1])) continue;
+        const gone = [t[0], t[2]].filter(id => !at.has(id));
+        if (gone.length) sliderNotes.push(`${t[1]} doesn’t slide: its neighbour ${gone.join(' and ')} is left out.`);
+        else sliders.push(t.map(id => at.get(id)));
+      }
+    }
     const imputed = list.map(s => (s.imputedRows || []).map(f => ({ j: use.indexOf(f.row), method: f.method })).filter(f => f.j >= 0));
     return {
       imputed, imputeNotes, impute: imp,
@@ -622,7 +763,8 @@
       dropped,
       estimated: list.reduce((n, s) => n + use.filter(i => s.status[i] === 'estimated').length, 0),
       semilandmarksAvailable: curveRows,
-      semilandmarksUsed: use.filter(i => dataset.rows[i].type === 'curve').length,
+      semilandmarksUsed: use.filter(i => isSemi(dataset.rows[i])).length,
+      semilandmarks: semi, sliders, sliderNotes,
     };
   }
 
@@ -849,11 +991,15 @@
       const lost = prep.dropped.specimens.length;
       return fail(`Superimposition needs at least three specimens.${lost ? ` ${lost} were left out because of missing landmarks: try leaving out the landmark instead.` : ''}`);
     }
-    const g = gpa(prep.matrix);
+    let g;
+    try {
+      g = gpa(prep.matrix, prep.sliders.length ? { sliders: prep.sliders, slide: opts && opts.slide } : {});
+    } catch (e) { return fail(e.message); }
     const p = pca(g.tangent);
     if (!p.values.length) return fail('All specimens have exactly the same shape, so there is no variation to analyse.');
     return {
       ok: true, prep, gpa: g, pca: p,
+      unslid: prep.sliders.length ? gpa(prep.matrix).aligned : undefined,
       mirrored: findMirrored(prep.matrix).map(i => prep.specimens[i].key),
       outliers: flagHigh(g.procD),
     };

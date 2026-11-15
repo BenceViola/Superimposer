@@ -30,8 +30,13 @@ for (const [label, dim, R] of [['2D', 2, REF.two], ['3D', 3, REF.three]]) {
     const name = method === 'be' ? 'bending energy' : 'Procrustes distance';
     test(`${label}, ${name}: slid coordinates match gpagen`, () => {
       const g = GM.gpa(matrix, { sliders, slide: method });
-      const flips = flipsOf(g.consensus, ref.consensus);
-      g.consensus.forEach((p, i) => p.forEach((v, d) => near(v * flips[d], ref.consensus[i][d], TOL, `consensus ${i}`)));
+      // geomorph's consensus is the mean of the projected coordinates, which sliding leaves slightly off centre;
+      // ours is that mean centred and scaled (the shape is the same).
+      const theirs = GM.meanShape([ref.consensus]).map(p => p.slice());
+      const c = theirs[0].map((_, d) => theirs.reduce((q, p) => q + p[d], 0) / theirs.length);
+      theirs.forEach(p => p.forEach((v, d) => { p[d] = v - c[d]; }));
+      const flips = flipsOf(g.consensus, theirs);
+      g.consensus.forEach((p, i) => p.forEach((v, d) => near(v * flips[d], theirs[i][d], TOL, `consensus ${i}`)));
       g.tangent.forEach((c, n) => c.forEach((p, i) => p.forEach((v, d) => near(v * flips[d], ref.coords[n][i][d], TOL, `specimen ${n}, point ${i}`))));
       ref.csize.forEach((v, n) => near(g.csize[n], v, 1e-9 * v));
       assert.equal(g.slideIterations, ref.iter);

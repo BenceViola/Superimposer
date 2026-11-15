@@ -78,7 +78,7 @@
     const ok = !!(res && res.ok);
     const at = new Map(ok ? res.prep.specimens.map((s, i) => [s.key, i]) : []);
     const groups = table ? IO.joinGroups(dataset.specimens, table).values : dataset.specimens.map(() => ({}));
-    const counted = dataset.rows.map((r, i) => (r.type !== 'curve' || opts.semilandmarks ? i : -1)).filter(i => i >= 0);
+    const counted = dataset.rows.map((r, i) => (r.type !== 'curve' || (opts.semilandmarks !== false && opts.semilandmarks !== 'omit') ? i : -1)).filter(i => i >= 0);
     const rows = dataset.specimens.map((s, n) => {
       const count = st => counted.filter(i => s.status[i] === st).length;
       const i = at.get(s.key);

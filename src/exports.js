@@ -54,6 +54,19 @@
       rep.rows.map(r => [r.id, r.name, r.specimens, r.pairs, r.mean == null ? '' : num(r.mean), r.max == null ? '' : num(r.max), rep.units, r.flag ? 'yes' : 'no']));
   }
 
+  function semilandmarkLine(res) {
+    const { prep } = res, g = res.gpa;
+    if (!prep.semilandmarksUsed) return `Semilandmarks: ${prep.semilandmarksAvailable ? 'left out' : 'none'}.`;
+    if (g.slideIterations) {
+      const how = g.slide === 'procd' ? "Procrustes distance (as geomorph's gpagen with ProcD = TRUE)" : "bending energy (as geomorph's gpagen with ProcD = FALSE)";
+      const fixedOnes = prep.semilandmarksUsed - g.sliders.length;
+      return `Semilandmarks: ${g.sliders.length} slid by ${how}, ${g.slideIterations} rounds (geomorph's count), sliders in sliders.csv.`
+        + (fixedOnes ? ` ${fixedOnes} other semilandmark${fixedOnes === 1 ? '' : 's'} (curve ends) treated as fixed.` : '')
+        + (prep.sliderNotes.length ? ` ${prep.sliderNotes.join(' ')}` : '');
+    }
+    return `Semilandmarks: ${prep.semilandmarksUsed} treated as fixed landmarks (not slid).`;
+  }
+
   function settingsText(res, opts, dataset) {
     opts = opts || {};
     const { prep } = res;
@@ -66,7 +79,7 @@
       `Coordinates: y points up; 2D landmark-json files were flipped to match TPS.`,
       `Units for centroid size: ${dataset.units}.`,
       `Missing data: ${opts.missing === 'points' ? 'landmarks with gaps left out' : 'specimens with gaps left out'}.`,
-      `Semilandmarks: ${prep.semilandmarksUsed ? `${prep.semilandmarksUsed} included, NOT slid` : 'left out'}.`,
+      semilandmarkLine(res),
       `Replicates: ${opts.replicates === 'average' ? 'averaged per specimen and operator' : 'all kept as separate records'}.`,
       `Estimated landmarks used: ${prep.estimated}.`,
       imputationLine(prep, opts.impute),
@@ -135,6 +148,7 @@
         { name: 'group-pairs.csv', data: groupPairsCSV(groupRes.stats) },
         { name: 'group-means.csv', data: groupMeansCSV(groupRes.stats, res) });
     }
+    if (res.gpa.slideIterations) extra.push({ name: 'sliders.csv', data: 'before,slide,after\n' + res.gpa.sliders.map(t => t.map(i => i + 1).join(',')).join('\n') + '\n' });
     let settings = settingsText(res, opts, dataset);
     if (groupRes && groupRes.stats && groupRes.stats.groups.length) settings += groupsLine(groupRes) + '\n';
     return [...extra,
