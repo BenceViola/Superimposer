@@ -78,3 +78,21 @@ out$groups <- list(
   perms = unname(lapply(ind[-1], function(x) x - 1))
 )
 write_json(out, "tests/fixtures/geomorph-reference.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
+
+# Sliding semilandmarks: gpagen with a curves matrix, by bending energy and by Procrustes distance,
+# with geomorph's default iterations. Written to a file of its own.
+slide <- function(tps, csv) {
+  A <- readland.tps(tps, specID = "ID", warnmsg = FALSE)
+  cv <- as.matrix(read.csv(csv))
+  run <- function(procD) {
+    g <- gpagen(A, curves = cv, ProcD = procD, Proj = TRUE, PrinAxes = TRUE, print.progress = FALSE)
+    list(iter = g$iter, csize = unname(g$Csize), consensus = unname(g$consensus),
+         coords = lapply(1:dim(A)[3], function(i) unname(g$coords[, , i])))
+  }
+  list(n = dim(A)[3], p = dim(A)[1], k = dim(A)[2], curves = unname(cv),
+       be = run(FALSE), procd = run(TRUE))
+}
+sl <- list(geomorph = as.character(packageVersion("geomorph")),
+           two = slide("tests/fixtures/curves-2d.tps", "tests/fixtures/sliders-2d.csv"),
+           three = slide("tests/fixtures/curves-3d.tps", "tests/fixtures/sliders-3d.csv"))
+write_json(sl, "tests/fixtures/geomorph-sliders.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
