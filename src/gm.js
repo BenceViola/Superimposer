@@ -690,6 +690,156 @@
     };
   }
 
+  /* ---------- groups ---------- */
+  /** Average of several configurations, landmark by landmark. */
+  function meanShape(list) {
+    return list[0].map((p, i) => p.map((_, d) => {
+      let s = 0;
+      for (const c of list) s += c[i][d];
+      return s / list.length;
+    }));
+  }
+
+  /** A small seeded generator (mulberry32), so permutation results don't change between reruns. */
+  function seeded(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function shuffled(n, random) {
+    const p = Array.from({ length: n }, (_, i) => i);
+    for (let i = n - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); const t = p[i]; p[i] = p[j]; p[j] = t; }
+    return p;
+  }
+
+  /**
+   * Group means, mean centroid size, Procrustes variance (as geomorph's morphol.disparity with coords ~ group),
+   * distances between means (as pairwise() with test.type "dist") and their permutation tests.
+   * fit: { coords (tangent coordinates), csize }; index: a level index per specimen, or -1 for none.
+   * opts: permutations (999), seed, or perms (explicit permutations of the grouped specimens, for tests).
+   * In a permutation, grouped specimen i takes the data of specimen perm[i]; p counts the observed value too.
+   */
+  function groupStats(fit, index, levels, opts) {
+    opts = opts || {};
+    const used = [], lab = [];
+    index.forEach((g, i) => { if (g >= 0 && g < levels.length) { used.push(i); lab.push(g); } });
+    const present = levels.map((_, g) => g).filter(g => lab.includes(g));
+    const re = new Map(present.map((g, k) => [g, k]));
+    const L = lab.map(g => re.get(g)), K = present.length, n = used.length;
+    const size = new Array(K).fill(0);
+    for (const k of L) size[k]++;
+    const groups = present.map((g, k) => {
+      const members = used.filter((_, u) => L[u] === k);
+      return {
+        name: levels[g], level: g, n: size[k], members,
+        mean: meanShape(members.map(i => fit.coords[i])),
+        csize: members.reduce((s, i) => s + fit.csize[i], 0) / size[k],
+      };
+    });
+    const out = { levels: present.map(g => levels[g]), groups, unassigned: index.length - n, distances: null, disparityDiff: null, pDistance: null, pDisparity: null, permutations: 0 };
+    if (!n) return out;
+
+    // Specimens as rows, centred on their grand mean; everything below needs only their inner products.
+    const X = used.map(i => fit.coords[i].flat()), m = X[0].length;
+    const centre = new Array(m).fill(0);
+    for (const r of X) for (let j = 0; j < m; j++) centre[j] += r[j] / n;
+    for (const r of X) for (let j = 0; j < m; j++) r[j] -= centre[j];
+    const G = Array.from({ length: n }, () => new Float64Array(n));
+    for (let a = 0; a < n; a++) for (let b = a; b < n; b++) {
+      let s = 0;
+      const xa = X[a], xb = X[b];
+      for (let j = 0; j < m; j++) s += xa[j] * xb[j];
+      G[a][b] = G[b][a] = s;
+    }
+    const block = Array.from({ length: K }, () => new Float64Array(K));
+    /** Squared distances between group means when specimen data[i] carries label lab_[i]. */
+    const meanDistances = labOf => {
+      for (const r of block) r.fill(0);
+      for (let a = 0; a < n; a++) {
+        const ra = block[labOf[a]], Ga = G[a];
+        for (let b = 0; b < n; b++) ra[labOf[b]] += Ga[b];
+      }
+      const d = Array.from({ length: K }, () => new Array(K).fill(0));
+      for (let g = 0; g < K; g++) for (let h = g + 1; h < K; h++) {
+        const v = block[g][g] / size[g] ** 2 + block[h][h] / size[h] ** 2 - 2 * block[g][h] / (size[g] * size[h]);
+        d[g][h] = d[h][g] = Math.sqrt(Math.max(0, v));
+      }
+      return d;
+    };
+    // Squared distance of each specimen to its own group mean (residuals of coords ~ group).
+    const means = groups.map(gr => gr.mean.flat());
+    const resid = used.map((i, u) => {
+      const x = fit.coords[i].flat(), mu = means[L[u]];
+      let s = 0;
+      for (let j = 0; j < m; j++) s += (x[j] - mu[j]) ** 2;
+      return s;
+    });
+    const variances = r => {
+      const pv = new Array(K).fill(0);
+      for (let u = 0; u < n; u++) pv[L[u]] += r[u];
+      return pv.map((v, k) => v / size[k]);
+    };
+    const pv = variances(resid);
+    groups.forEach((gr, k) => { gr.disparity = size[k] > 1 ? pv[k] : null; });
+    const pairs = f => Array.from({ length: K }, (_, g) => Array.from({ length: K }, (_, h) => f(g, h)));
+    const diffOf = v => pairs((g, h) => (size[g] > 1 && size[h] > 1 ? Math.abs(v[g] - v[h]) : null));
+    out.distances = meanDistances(L);
+    out.disparityDiff = diffOf(pv);
+    if (K < 2) { out.distances = out.disparityDiff = null; return out; }
+
+    let perms = opts.perms;
+    if (!perms) {
+      const count = opts.permutations == null ? 999 : opts.permutations, random = seeded(opts.seed == null ? 1 : opts.seed);
+      perms = Array.from({ length: count }, () => shuffled(n, random));
+    }
+    if (!perms.length) return out;
+    const hitD = pairs(() => 1), hitV = pairs(() => 1);
+    const atLeast = (y, x) => y >= x - 1e-10 * Math.abs(x);
+    const labOf = new Array(n), r = new Array(n);
+    for (const perm of perms) {
+      for (let u = 0; u < n; u++) { labOf[perm[u]] = L[u]; r[u] = resid[perm[u]]; }
+      const d = meanDistances(labOf), v = diffOf(variances(r));
+      for (let g = 0; g < K; g++) for (let h = 0; h < K; h++) {
+        if (g === h) continue;
+        if (atLeast(d[g][h], out.distances[g][h])) hitD[g][h]++;
+        if (v[g][h] != null && atLeast(v[g][h], out.disparityDiff[g][h])) hitV[g][h]++;
+      }
+    }
+    const total = perms.length + 1;
+    out.permutations = perms.length;
+    out.pDistance = pairs((g, h) => (g === h ? 1 : hitD[g][h] / total));
+    out.pDisparity = pairs((g, h) => (g === h ? 1 : out.disparityDiff[g][h] == null ? null : hitV[g][h] / total));
+    return out;
+  }
+
+  /** Outline of the ellipse holding a share `level` of a bivariate normal fitted to the points, or null. */
+  function ellipse(x, y, level, steps) {
+    const n = x.length;
+    if (n < 3) return null;
+    const q = -2 * Math.log(1 - (level || 0.95)), N = steps || 64;
+    let mx = 0, my = 0;
+    for (let i = 0; i < n; i++) { mx += x[i] / n; my += y[i] / n; }
+    let a = 0, b = 0, c = 0;
+    for (let i = 0; i < n; i++) { const dx = x[i] - mx, dy = y[i] - my; a += dx * dx; b += dx * dy; c += dy * dy; }
+    a /= n - 1; b /= n - 1; c /= n - 1;
+    const det = a * c - b * b;
+    if (!(det > 1e-18 * Math.max(a * a, c * c, 1e-300))) return null;
+    const tr = (a + c) / 2, disc = Math.sqrt(Math.max(0, ((a - c) / 2) ** 2 + b * b));
+    const l1 = tr + disc, l2 = tr - disc;
+    const ang = Math.atan2(l1 - a, b || 1e-300);
+    const v1 = Math.abs(b) > 1e-300 ? [Math.cos(ang), Math.sin(ang)] : (a >= c ? [1, 0] : [0, 1]);
+    const v2 = [-v1[1], v1[0]], r1 = Math.sqrt(q * l1), r2 = Math.sqrt(q * l2);
+    return Array.from({ length: N }, (_, k) => {
+      const t = (2 * Math.PI * k) / N, u = r1 * Math.cos(t), w = r2 * Math.sin(t);
+      return [mx + u * v1[0] + w * v2[0], my + u * v1[1] + w * v2[1]];
+    });
+  }
+
   /* ---------- whole analysis ---------- */
   function analyse(dataset, opts) {
     const prep = prepare(dataset, opts);
@@ -711,6 +861,6 @@
 
   return {
     tpsWarp, impute, fitRigid, symEig, centroidSize, rotateOnto, normalise, gpa, pca, shapeFromScores, shapeAt,
-    flagHigh, findMirrored, prepare, rawCoords, repeatability, analyse,
+    flagHigh, findMirrored, prepare, rawCoords, repeatability, analyse, groupStats, meanShape, ellipse,
   };
 }));
