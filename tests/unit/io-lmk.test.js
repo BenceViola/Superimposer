@@ -193,3 +193,56 @@ test('templatePairs lists each pair once', () => {
   const rows = [{ id: 'A', pair: '' }, { id: 'L', pair: 'R' }, { id: 'R', pair: 'L' }, { id: 'L2', pair: 'R2' }, { id: 'R2', pair: 'L2' }];
   assert.deepEqual(IO.templatePairs(rows), [['L', 'R'], ['L2', 'R2']]);
 });
+
+/* ---------- malformed contents ---------- */
+test('a position that is not a list of numbers counts as not placed, with a warning', () => {
+  const d = doc2d('A', [[1, 1], [2, 2], [3, 3]]);
+  d.landmarks[0].position = [1, null];
+  d.landmarks[1].position = ['x', 2];
+  d.landmarks[2].position = [5];
+  const r = IO.parseLmk(d, 'a.lmk.json');
+  const s = r.specimens[0];
+  assert.deepEqual(s.coords, [null, null, null]);
+  assert.deepEqual(s.status, ['not_done', 'not_done', 'not_done']);
+  assert.match(r.warnings.join(' '), /a\.lmk\.json.*LM01, LM02, LM03/);
+});
+
+test('numbers written as text are accepted', () => {
+  const d = doc2d('A', [[1, 1], [2, 2], [3, 3]]);
+  d.landmarks[0].position = ['1.5', '2'];
+  assert.deepEqual(IO.parseLmk(d, 'a').specimens[0].coords[0], [1.5, 198]);
+});
+
+test('a 3D position with only two numbers is not used', () => {
+  const d = doc3d('A', [[1, 2, 3], [4, 5, 6], [7, 8, 9]]);
+  d.landmarks[1].position = [4, 5];
+  const s = IO.parseLmk(d, 'a').specimens[0];
+  assert.equal(s.coords[1], null);
+  assert.ok(s.coords.every(c => !c || c.every(Number.isFinite)));
+});
+
+test('a curve with a bad point counts as not finished', () => {
+  const t = tpl2d({ curves: [{ id: 'C01', name: 'c', n_points: 2 }] });
+  const d = doc2d('A', [[1, 1], [2, 2], [3, 3]], { template: t });
+  d.curves = [{ id: 'C01', template_id: 'C01', status: 'placed', points: [{ position: [1, 2] }, { position: [null, 2] }] }];
+  const s = IO.parseLmk(d, 'a').specimens[0];
+  assert.deepEqual(s.status.slice(3), ['not_done', 'not_done']);
+});
+
+test('a 2D file without a usable image height is refused', () => {
+  const d = doc2d('A', [[1, 1], [2, 2], [3, 3]]);
+  delete d.specimen.image.height;
+  assert.throws(() => IO.parseLmk(d, 'a.lmk.json'), /height/);
+});
+
+test('a scale that is not a positive number is ignored', () => {
+  const d = doc2d('A', [[1, 1], [2, 2], [3, 3]]);
+  d.specimen.image.scale = { value: 'abc', units: 'mm' };
+  assert.equal(IO.parseLmk(d, 'a').specimens[0].units, 'px');
+});
+
+test('landmarks that are not objects are skipped', () => {
+  const d = doc2d('A', [[1, 1], [2, 2], [3, 3]]);
+  d.landmarks.push(null, 7, 'x');
+  assert.equal(IO.parseLmk(d, 'a').specimens[0].coords.length, 3);
+});

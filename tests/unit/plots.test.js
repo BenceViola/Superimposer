@@ -504,3 +504,18 @@ test('shape tiles ring imputed landmarks', () => {
   assert.equal(count(s, /class="imputed"/g), 2);
   assert.match(s, /Imputed landmark/);
 });
+
+/* ---------- lighter figures while turning ---------- */
+test('maxPoints thins the clouds but keeps the consensus and every specimen’s marks spread', () => {
+  const full = PL.superimposition(sup());
+  const light = PL.superimposition(sup({ maxPoints: 10 }));
+  wellFormed(light);
+  assert.equal(count(full, /M[-\d.]+ [-\d.]+h0/g), 30);
+  assert.equal(count(light, /M[-\d.]+ [-\d.]+h0/g), 10);
+  assert.equal(count(light, /class="consensus"/g), 5);
+  assert.equal(count(PL.rawData(raw({ maxPoints: 10 })), /M[-\d.]+ [-\d.]+h0/g), 10);
+});
+
+test('maxPoints larger than the data changes nothing', () => {
+  assert.equal(PL.superimposition(sup({ maxPoints: 1e6 })), PL.superimposition(sup()));
+});
