@@ -88,7 +88,7 @@ details.card[open] summary{margin-bottom:6px}
 .dt-right{margin-left:auto}
 .dt-sep{width:1px;height:18px;background:var(--line)}
 #dtHint{margin-bottom:7px}
-.dt-wrap{overflow:auto;max-height:calc(100vh - 262px);min-height:200px;border:1px solid var(--line);border-radius:6px}
+.dt-wrap{overflow:auto;scroll-padding-top:34px;max-height:calc(100vh - 262px);min-height:200px;border:1px solid var(--line);border-radius:6px}
 #dataTable{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
 #dataTable th,#dataTable td{background:var(--panel);white-space:nowrap;padding:3px 7px;border-bottom:1px solid var(--line)}
 #dataTable th{top:0;z-index:2;position:sticky}

@@ -8,12 +8,14 @@
   const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   const MAX_PICKS = 4;
+  const DRAG_POINTS = 5000; // points drawn while a 3D view turns
   const IDENTITY = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
 
   const S = {
     all: [], warnings: [], refused: [], confirmTps: false, table: null,
     dataset: null, res: null, repeat: null,
     missing: 'specimens', replicates: 'all', semilandmarks: false,
+    dataVersion: 0, assembledFrom: null, assembledTps: false, resKey: null, dragging: false,
     impute: { method: 'none', mirrorFirst: false, max: 3, notDone: false, ref: '' }, pairs: [], pairsFile: '',
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
     colour: '', labels: true, hulls: false, equal: true,
@@ -47,13 +49,33 @@
   const unitWord = u => ({ px: 'pixels', mm: 'mm', scaled: 'scaled units', unknown: 'unknown units', mixed: 'mixed units' }[u] || u);
 
   /* ---------- analysis ---------- */
+  /** Everything the analysis depends on, so it is only redone when one of them changes. */
+  function analysisKey() {
+    return `${S.dataVersion}|${JSON.stringify(optsNow(), (k, v) => (v instanceof Set ? [...v].sort() : v instanceof Map ? [...v] : v === Infinity ? 'any' : v))}`;
+  }
+
   function rerun() {
-    S.dataset = IO.assemble(S.all, { confirmTps: S.confirmTps });
+    if (S.all !== S.assembledFrom || S.confirmTps !== S.assembledTps) {
+      S.dataset = IO.assemble(S.all, { confirmTps: S.confirmTps });
+      S.assembledFrom = S.all;
+      S.assembledTps = S.confirmTps;
+      S.dataVersion++;
+      S.repeat = GM.repeatability(S.dataset);
+    }
     syncLinks();
     const known = new Set(S.dataset.specimens.map(s => s.key));
     S.picked = S.picked.filter(p => p.virtual || known.has(p.key));
-    S.res = S.dataset.specimens.length ? GM.analyse(S.dataset, optsNow()) : null;
-    S.repeat = GM.repeatability(S.dataset);
+    const key = S.dataset.specimens.length ? analysisKey() : '';
+    if (key !== S.resKey) {
+      S.resKey = null;
+      try {
+        S.res = key ? GM.analyse(S.dataset, optsNow()) : null;
+        S.resKey = key;
+      } catch (err) {
+        console.error(err); // eslint-disable-line no-console
+        S.res = { ok: false, prep: null, message: `Something went wrong in the analysis (${err.message}). Try another setting; if it keeps happening, please report it together with the data files.` };
+      }
+    }
     // A theoretical shape only means something in the PCA it came from.
     const fitted = S.res && S.res.ok ? S.res.prep : null;
     const sig = fitted ? JSON.stringify([fitted.specimens.map(s => [s.key, s.flipped]), fitted.rows.map(r => r.id), S.impute]) : '';
@@ -83,9 +105,22 @@
     if (!S.linkSig || !S.table) return;
     try { localStorage.setItem(groupKey(S.linkSig), JSON.stringify(S.table)); } catch { /* see writeStored */ }
   }
-  function readJson(key, fallback) {
-    try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
+  /** A saved value, if it is there and has the expected shape; otherwise the fallback (old or damaged entries are ignored). */
+  function readJson(key, fallback, valid) {
+    try {
+      const v = JSON.parse(localStorage.getItem(key));
+      return v != null && (!valid || valid(v)) ? v : fallback;
+    } catch { return fallback; }
   }
+  const isObject = v => typeof v === 'object' && v !== null && !Array.isArray(v);
+  const isPairList = v => Array.isArray(v) && v.every(p => Array.isArray(p) && p.length === 2 && p.every(x => typeof x === 'string'));
+  const VALID = {
+    links: isPairList,
+    styles: v => isObject(v) && Object.values(v).every(isObject),
+    pairs: v => isObject(v) && isPairList(v.pairs) && (v.file == null || typeof v.file === 'string'),
+    table: v => isObject(v) && Array.isArray(v.columns) && v.columns.length > 0 && v.columns.every(c => typeof c === 'string')
+      && Array.isArray(v.rows) && v.rows.every(isObject),
+  };
   function writeStyles() {
     if (!S.linkSig) return;
     try {
@@ -105,13 +140,13 @@
     const sig = d.rows.length ? JSON.stringify([d.templateName, d.dim, d.rows.map(r => r.id)]) : null;
     if (sig === S.linkSig) return;
     S.linkSig = sig;
-    S.links = sig ? readJson(storeKey(sig), []) : [];
-    S.styles = sig ? readJson(styleKey(sig), {}) : {};
-    const storedPairs = sig ? readJson(pairsKey(sig), null) : null;
+    S.links = sig ? readJson(storeKey(sig), [], VALID.links) : [];
+    S.styles = sig ? readJson(styleKey(sig), {}, VALID.styles) : {};
+    const storedPairs = sig ? readJson(pairsKey(sig), null, VALID.pairs) : null;
     S.pairs = storedPairs ? storedPairs.pairs : [];
     S.pairsFile = storedPairs ? storedPairs.file : '';
     if (sig && !S.table) {
-      S.table = readJson(groupKey(sig), null);
+      S.table = readJson(groupKey(sig), null, VALID.table);
       if (S.table) S.tableReport = 'Group columns remembered from your last session in this browser.';
     }
     S.linkStart = null;
@@ -161,6 +196,14 @@
 
   /* ---------- drawing ---------- */
   function render() {
+    try { renderAll(); } catch (err) {
+      console.error(err); // eslint-disable-line no-console
+      $('message').hidden = false;
+      $('message').textContent = `Something went wrong while drawing (${err.message}). Try another setting, or reload the page.`;
+    }
+  }
+
+  function renderAll() {
     const has = S.all.length > 0 || S.refused.length > 0;
     $('empty').hidden = has;
     $('side').hidden = !has;
@@ -206,8 +249,70 @@
     return { all, rows: S.dtSort ? TB.sortRows(shown, S.dtSort.col, S.dtSort.dir) : shown };
   }
 
+  /* Large tables draw only the rows in view (plus a margin), with spacer rows standing in for the rest. */
+  const WINDOW_FROM = 150, MARGIN_ROWS = 25;
+  let rowHeight = 0;
+  function windowRange() {
+    const n = S.dtRows.length;
+    if (n <= WINDOW_FROM) return [0, n];
+    const wrap = $('dtWrap'), h = rowHeight || 27;
+    const first = Math.floor(wrap.scrollTop / h), seen = Math.ceil(wrap.clientHeight / h);
+    return [Math.max(0, first - MARGIN_ROWS), Math.min(n, first + seen + MARGIN_ROWS)];
+  }
+  function renderBody(focus) {
+    if (focus === undefined) focus = focusOf(document.activeElement);
+    const body = $('dataTable').tBodies[0];
+    if (!body) return;
+    const [a, b] = windowRange(), h = rowHeight || 27;
+    S.dtWindow = [a, b];
+    const spacer = px => (px > 0 ? `<tr class="dt-spacer" aria-hidden="true"><td colspan="${S.dtLayout.cols}" style="height:${px}px;padding:0;border:0"></td></tr>` : '');
+    body.innerHTML = spacer(a * h) + S.dtRows.slice(a, b).map(S.dtLayout.row).join('') + spacer((S.dtRows.length - b) * h);
+    // Measure the real row height once rows exist, and redraw if the spacers were off.
+    const drawn = body.querySelectorAll('tr[data-key]');
+    if (drawn.length) {
+      const measured = (drawn[drawn.length - 1].getBoundingClientRect().bottom - drawn[0].getBoundingClientRect().top) / drawn.length;
+      if (measured > 0 && Math.abs(measured - rowHeight) > 0.5) {
+        rowHeight = measured;
+        if (S.dtRows.length > WINDOW_FROM) { renderBody(focus); return; }
+      }
+    }
+    if (focus) restoreFocus(focus);
+  }
+  /** The row element for a position in the shown order, scrolling it into the drawn part if needed. */
+  function rowElement(index) {
+    const key = S.dtRows[index].key;
+    const find = () => [...$('dataTable').tBodies[0].rows].find(r => r.dataset.key === key);
+    let el = find();
+    if (!el) {
+      const wrap = $('dtWrap'), h = rowHeight || 27;
+      wrap.scrollTop = Math.max(0, index * h - wrap.clientHeight / 2);
+      renderBody(null);
+      el = find();
+    }
+    return el;
+  }
+  const countText = () => `${S.dtRows.length} of ${plural(S.dtTotal || 0, 'record')}${S.dtSelected.size ? ` · ${S.dtSelected.size} selected` : ''}`;
+  /** Selection changes touch only the drawn rows and the counters, not the whole table. */
+  function refreshSelection() {
+    const body = $('dataTable').tBodies[0];
+    if (body) {
+      for (const tr of body.rows) {
+        if (!tr.dataset.key) continue;
+        const on = S.dtSelected.has(tr.dataset.key);
+        tr.classList.toggle('ticked', on);
+        const box = tr.querySelector('.dt-select');
+        if (box) box.checked = on;
+      }
+    }
+    const all = S.dtRows.length > 0 && S.dtRows.every(r => S.dtSelected.has(r.key));
+    const head = $('dtSelectAll');
+    if (head) { head.checked = all; head.indeterminate = !all && S.dtRows.some(r => S.dtSelected.has(r.key)); }
+    $('bBulk').disabled = !groupColumns().length || !S.dtSelected.size;
+    $('dtCount').textContent = countText();
+    $('bClearSel').hidden = !S.dtSelected.size;
+  }
+
   function renderDataTable() {
-    const active = document.activeElement;
     const focus = focusOf(document.activeElement);
     const known = new Set(S.dataset.specimens.map(s => s.key));
     S.dtSelected = new Set([...S.dtSelected].filter(k => known.has(k)));
@@ -224,7 +329,7 @@
     const BASE = [['replicate', 'Rep.'], ['operator', 'Operator'], ['source', 'Source'], ['units', 'Units'], ['csize', 'Centroid size'], ['dist', 'Proc. distance'], ['missing', 'Missing'], ['notDone', 'Not done'], ['estimated', 'Estimated'], ['imputed', 'Imputed']];
     const numCell = (v, text, c, extra) => `<td class="n ${extra || ''}" data-c="${c}">${v == null || v === 0 ? '' : text}</td>`;
 
-    const lines = rows.map(r => {
+    const rowHtml = r => {
       const coordCells = points.flatMap(p => axes.map((a, d) => {
         const c = r.coords[p.at], name = `${p.id}_${a}`;
         const est = r.status[p.at] === 'estimated' ? 'dt-est' : '';
@@ -246,7 +351,9 @@
         + numCell(r.estimated, r.estimated, 'estimated')
         + numCell(r.imputed, r.imputed, 'imputed')
         + coordCells + '</tr>';
-    }).join('');
+    };
+    S.dtTotal = all.length;
+    S.dtLayout = { row: rowHtml, cols: 4 + groups.length + BASE.length + points.length * axes.length };
 
     const allTicked = rows.length > 0 && rows.every(r => S.dtSelected.has(r.key));
     $('dataTable').innerHTML = `<thead><tr><th class="fix f0"><input type="checkbox" id="dtSelectAll" ${allTicked ? 'checked' : ''} aria-label="Tick all rows shown"></th>`
@@ -259,7 +366,8 @@
           + `<button type="button" class="x ${S.dtArmed === g ? 'armed' : ''}" data-remove="${esc(g)}" aria-label="Remove column ${esc(g)}">${S.dtArmed === g ? 'Remove?' : '×'}</button></th>`)).join('')
       + BASE.map(([c, l]) => `<th>${head(c, l)}</th>`).join('')
       + points.flatMap(p => axes.map(a => `<th>${esc(p.id)}_${a}</th>`)).join('')
-      + `</tr></thead><tbody>${lines}</tbody>`;
+      + '</tr></thead><tbody></tbody>';
+    renderBody(null);
     const headBox = $('dtSelectAll');
     if (headBox) headBox.indeterminate = !allTicked && rows.some(r => S.dtSelected.has(r.key));
 
@@ -276,7 +384,7 @@
     $('bBulk').disabled = !groups.length || !S.dtSelected.size;
     $('bSaveGroups').disabled = !groups.length;
     $('chkCoords').checked = S.dtCoords;
-    $('dtCount').textContent = `${rows.length} of ${plural(all.length, 'record')}${S.dtSelected.size ? ` · ${S.dtSelected.size} selected` : ''}`;
+    $('dtCount').textContent = countText();
     $('dtHint').textContent = S.dtMessage || (S.dtCoords
       ? 'Coordinates as imported: y points up, and scale applied. Red cells are missing, yellow ones estimated.'
       : 'Click rows to select them (Shift for a range, Ctrl or ⌘ for single rows), then assign a group, or type in a cell and press Ctrl or ⌘ + Enter to fill all selected rows. Groups belong to the specimen ID, so replicates stay together.');
@@ -309,7 +417,7 @@
     const next = TB.clickSelect({ selected: S.dtSelected, anchor: S.dtAnchor }, S.dtRows.map(r => r.key), key, mods);
     S.dtSelected = next.selected;
     S.dtAnchor = next.anchor;
-    renderDataTable();
+    refreshSelection();
   }
 
   /** A text cell lets the arrow leave when all of it is selected, or the caret is at that end. */
@@ -325,7 +433,9 @@
     const items = [...row.querySelectorAll(NAV)], i = items.indexOf(t);
     let next = null;
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      const other = e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling;
+      const to = S.dtRows.findIndex(r => r.key === row.dataset.key) + (e.key === 'ArrowDown' ? 1 : -1);
+      if (to < 0 || to >= S.dtRows.length) { e.preventDefault(); return; }
+      const other = rowElement(to);
       next = other && other.querySelectorAll(NAV)[i];
       if (e.shiftKey) {
         e.preventDefault();
@@ -596,8 +706,8 @@
     const col = c => res.pca.scores.map(r => r[c]);
     return {
       super: (theme_, extra) => (!S.fitted
-        ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, styles, selected, view, links, imputed, theme: theme_ }, extra))
-        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, styles, selected, view, labels: S.labels, links, imputed, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
+        ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, styles, selected, view, links, imputed, maxPoints: S.dragging ? DRAG_POINTS : undefined, theme: theme_ }, extra))
+        : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, styles, selected, view, labels: S.labels, links, imputed, maxPoints: S.dragging ? DRAG_POINTS : undefined, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
       scatter: (theme_, extra) => PL.scatter(Object.assign({}, base, { x: col(S.pcX), y: col(S.pcY), xLabel: pcName(S.pcX), yLabel: pcName(S.pcY), equal: S.equal, zeroLines: true, virtual: S.picked.filter(p => p.virtual).map(p => ({ x: p.scores[S.pcX], y: p.scores[S.pcY], label: 'Theoretical' })), theme: theme_ }, extra)),
       picked: (theme_, extra) => PL.shapeGrid({ items: pickedItems(styles.map(st => PL.colourValue(st.colour, theme_))), mean: res.gpa.consensus, rows: res.prep.rows, links, view, labels: S.labels, theme: theme_, width: extra && extra.width }),
       scree: (theme_, extra) => PL.scree(Object.assign({ proportion: res.pca.proportion, theme: theme_, height: 190 }, extra)),
@@ -778,7 +888,12 @@
   on($('bFit'), 'click', () => { S.fitted = !S.fitted; render(); });
 
   // Data table
-  on($('dtFilter'), 'input', e => { S.dtFilter = e.target.value; renderDataTable(); });
+  // Wait for a short pause in typing, so a wide table isn't redrawn for every letter.
+  let filterTimer = 0;
+  on($('dtFilter'), 'input', e => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => { S.dtFilter = e.target.value; $('dtWrap').scrollTop = 0; renderDataTable(); }, 150);
+  });
   on($('chkCoords'), 'change', e => { S.dtCoords = e.target.checked; renderDataTable(); });
   on($('dtBulkCol'), 'change', () => renderDataTable());
   on($('bLoadGroups'), 'click', () => $('fGroups').click());
@@ -837,7 +952,7 @@
     const t = e.target;
     if (t.id === 'dtSelectAll') {
       for (const r of S.dtRows) { if (t.checked) S.dtSelected.add(r.key); else S.dtSelected.delete(r.key); }
-      renderDataTable();
+      refreshSelection();
     } else if (t.classList.contains('dt-use')) {
       const key = t.closest('tr').dataset.key;
       if (t.checked) S.excludeSpecimens.delete(key); else S.excludeSpecimens.add(key);
@@ -857,7 +972,7 @@
       e.preventDefault();
       S.dtSelected = new Set(S.dtRows.map(r => r.key));
       const f = focusOf(t);
-      renderDataTable();
+      refreshSelection();
       if (f) restoreFocus(f);
       return;
     }
@@ -880,7 +995,18 @@
   on($('dataTable'), 'mousedown', e => {
     if (e.shiftKey && e.target.closest('tbody tr') && !e.target.closest('input.dt-cell')) e.preventDefault();
   });
-  on($('bClearSel'), 'click', () => { S.dtSelected = new Set(); S.dtAnchor = null; renderDataTable(); });
+  on($('bClearSel'), 'click', () => { S.dtSelected = new Set(); S.dtAnchor = null; refreshSelection(); });
+  let scrollQueued = false;
+  on($('dtWrap'), 'scroll', () => {
+    if (scrollQueued || S.dtRows.length <= WINDOW_FROM) return;
+    scrollQueued = true;
+    requestAnimationFrame(() => {
+      scrollQueued = false;
+      const [a, b] = S.dtWindow || [0, 0], n = S.dtRows.length, wrap = $('dtWrap'), h = rowHeight || 27;
+      const first = Math.floor(wrap.scrollTop / h), last = first + Math.ceil(wrap.clientHeight / h);
+      if ((first < a + 5 && a > 0) || (last > b - 5 && b < n)) renderBody();
+    });
+  });
   on($('dataTable'), 'focusout', e => {
     if (e.target.classList.contains('dt-rename')) finishRename(e.target, true);
   });
@@ -1095,10 +1221,15 @@
     on(window, 'pointermove', e => {
       if (!last) return;
       S.view = PL.turnView(S.view, (e.clientX - last[0]) * 0.012, (e.clientY - last[1]) * 0.012);
+      S.dragging = true;
       last = [e.clientX, e.clientY];
       if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; renderFigures(); }); }
     });
-    on(window, 'pointerup', () => { last = null; });
+    on(window, 'pointerup', () => {
+      if (!last) return;
+      last = null;
+      if (S.dragging) { S.dragging = false; requestAnimationFrame(() => renderFigures()); }
+    });
   }
 
   // Dropping files anywhere.

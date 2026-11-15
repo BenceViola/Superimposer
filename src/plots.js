@@ -296,8 +296,19 @@
   const polyline = (pts, cls, attrs) => `<polyline class="${cls}" points="${pts.map(p => `${f(p[0])},${f(p[1])}`).join(' ')}" fill="none" ${attrs}/>`;
 
   /** All points of all specimens as small marks, one path per colour and marker. */
-  function clouds(sets, paints, place) {
+  function clouds(sets, paints, place, maxPoints) {
     const n = sets.length, batches = new Map();
+    // While a 3D view turns, an evenly spread sample of the points is enough, and much quicker to draw.
+    const total = sets.reduce((s, c) => s + c.length, 0);
+    const keep = maxPoints && total > maxPoints ? maxPoints : 0;
+    let seen = 0, next = 0;
+    const take = () => {
+      if (!keep) return true;
+      const yes = seen === Math.floor(next * total / keep);
+      if (yes) next++;
+      seen++;
+      return yes;
+    };
     sets.forEach((c, i) => {
       const k = `${paints[i].fill}|${paints[i].marker}`;
       if (!batches.has(k)) batches.set(k, { fill: paints[i].fill, marker: paints[i].marker, sets: [] });
@@ -311,6 +322,7 @@
       const corners = markerCorners(b.marker, r);
       for (const c of b.sets) {
         for (const p of c) {
+          if (!take()) continue;
           const [x, y] = place(p);
           d += corners ? `M${corners.map(([a, q]) => `${f(x + a)} ${f(y + q)}`).join('L')}z` : `M${f(x)} ${f(y)}h0`;
         }
@@ -353,7 +365,7 @@
         b += `<polygon class="raw-outline" points="${hull.map(p => `${f(p[0])},${f(p[1])}`).join(' ')}" fill="none" stroke="${paints[i].fill}" stroke-opacity="0.45" stroke-width="1"><title>${esc(o.keys[i])}</title></polygon>`;
       });
     }
-    b += clouds(sets, paints, place);
+    b += clouds(sets, paints, place, o.maxPoints);
     const chosen = selectedKeys(o);
     sets.forEach((c, i) => {
       if (!chosen.has(o.keys[i])) return;
@@ -372,7 +384,7 @@
     const aligned = o.aligned.map(c => project(c, o.view));
     const cons = project(o.consensus, o.view);
     const place = fitter([...aligned.flat(), ...cons], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
-    let b = lg.svg + clouds(aligned, paintList(o, t), place);
+    let b = lg.svg + clouds(aligned, paintList(o, t), place, o.maxPoints);
     for (const chain of curveChains(o.rows)) b += polyline(chain.map(i => place(cons[i])), 'curve-line', `stroke="${t.ink}" stroke-width="1.5" stroke-opacity="0.75"`);
     if (hasLinks(o)) b += `<path class="wire" d="${linkPath([cons], o.links, place)}" fill="none" stroke="${t.ink}" stroke-width="1.5"/>`;
     const chosen = selectedKeys(o);

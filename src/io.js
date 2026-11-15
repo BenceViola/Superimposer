@@ -114,7 +114,21 @@
   }
 
   /* ---------- landmark-json ---------- */
-  function exportRows(doc, warnings, sourceName) {
+  /** A position as dim finite numbers (numbers written as text are accepted), or null if it can't be used. */
+  function cleanPosition(pos, dim) {
+    if (!Array.isArray(pos) || pos.length < dim) return null;
+    const out = [];
+    for (let d = 0; d < dim; d++) {
+      const v = pos[d];
+      const x = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+      if (!Number.isFinite(x)) return null;
+      out.push(x);
+    }
+    return out;
+  }
+
+  function exportRows(doc, warnings, sourceName, dim) {
+    const bad = [];
     const T = doc.template || {};
     const entries = Array.isArray(doc.landmarks) ? doc.landmarks : [];
     const curves = Array.isArray(doc.curves) ? doc.curves : [];
@@ -135,7 +149,9 @@
       const lm = lmDefs.find(l => l.id === id);
       if (lm) {
         const e = entries.find(x => x && x.template_id === id);
-        const pos = e && e.status !== 'missing' && Array.isArray(e.position) ? e.position : null;
+        const given = e && e.status !== 'missing' && e.position != null;
+        const pos = given ? cleanPosition(e.position, dim) : null;
+        if (given && !pos) bad.push(id);
         const status = !e ? 'not_done' : e.status === 'missing' ? 'missing' : pos ? (e.status === 'estimated' ? 'estimated' : 'placed') : 'not_done';
         const pair = lm.bilateral_pair && lm.bilateral_pair !== id && lmIds.includes(lm.bilateral_pair) ? lm.bilateral_pair : '';
         rows.push({ id, label: lm.name || '', type: 'landmark', curve: '', index: '', pair, pos, status });
@@ -145,11 +161,13 @@
       if (!c) continue;
       const n = Number.isInteger(c.n_points) && c.n_points > 0 ? c.n_points : DEFAULT_CURVE_POINTS;
       const e = curves.find(x => x && x.template_id === id);
-      const done = e && e.status !== 'missing' && Array.isArray(e.points) && e.points.length === n;
+      let done = e && e.status !== 'missing' && Array.isArray(e.points) && e.points.length === n;
+      const points = done ? e.points.map(q => cleanPosition(q && q.position, dim)) : [];
+      if (done && points.some(q => !q)) { done = false; bad.push(id); }
       for (let k = 0; k < n; k++) {
         rows.push({
           id: `${id}_${pad2(k + 1)}`, label: c.name || '', type: 'curve', curve: id, index: k + 1,
-          pos: done ? e.points[k].position : null,
+          pos: done ? points[k] : null,
           status: done ? (e.status === 'estimated' ? 'estimated' : 'placed') : e && e.status === 'missing' ? 'missing' : 'not_done',
         });
       }
@@ -157,6 +175,7 @@
     if (entries.some(e => e && !e.template_id && e.position)) {
       warnings.push(`${sourceName}: ad hoc points (not in the template) were left out.`);
     }
+    if (bad.length) warnings.push(`${sourceName}: unusable coordinates for ${bad.join(', ')}; treated as not placed.`);
     return rows;
   }
 
@@ -173,7 +192,8 @@
     const image = sp.image, mesh = sp.mesh;
     if (!image && !mesh) throw new Error(`${sourceName}: the specimen has no image or mesh.`);
     const warnings = [];
-    const rows = exportRows(doc, warnings, sourceName);
+    if (image && !(Number(image.height) > 0)) throw new Error(`${sourceName}: the image has no usable height, which is needed to place its landmarks.`);
+    const rows = exportRows(doc, warnings, sourceName, image ? 2 : 3);
 
     const dim = image ? 2 : 3;
     let k = 1, units;

@@ -24,6 +24,15 @@ All logic is pure and DOM-free (UMD: `window.SupX` in the browser, `require` in 
 - Rotations never reflect. Mirroring is only done on request (`flip`).
 - A specimen record's `key` is unique; `id` is not (replicates, operators).
 
+## Performance and reliability
+
+- Never spread a list that can grow into function arguments (`Math.max(...xs)`, `push(...xs)`): it overflows the call stack on long lists, much sooner in Safari. Use loops (`extent()` in each module) or `concat`. `tests/unit/large.test.js` guards this.
+- `app.js` reruns the analysis only when `analysisKey()` changes (data version plus `optsNow()`); display options, group edits and selection don't redo it. Anything new that affects the analysis must go through `optsNow()`.
+- `rerun()` and `render()` catch errors and show them in `#message`, so one bad case doesn't leave a blank page.
+- The Data table draws only the rows in view once there are more than `WINDOW_FROM` rows; selection updates rows in place (`refreshSelection`), and keyboard movement goes by position in `S.dtRows`, not by DOM siblings.
+- While a 3D view is dragged, figures draw at most `DRAG_POINTS` points; the full figure is drawn on release.
+- Saved settings in `localStorage` are checked for shape before use (`VALID`); damaged entries are ignored.
+
 ## Working method: red/green TDD
 
 Write the failing test first, see it fail, then implement. Commit red and green separately when that's practical.
