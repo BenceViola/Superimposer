@@ -224,6 +224,8 @@
       coords, status: rows.map(r => r.status),
       signature: JSON.stringify([T.id || '', dim, rows.map(r => r.id)]),
       templateId: T.id || '', templateName: T.name || T.id || '',
+      curves: (Array.isArray(T.curves) ? T.curves : []).filter(c => c && rows.some(r => r.curve === c.id))
+        .map(c => ({ id: String(c.id), start: c.closed ? '' : String(c.start || ''), end: c.closed ? '' : String(c.end || ''), closed: c.closed === true })),
     };
     return { specimens: [specimen], warnings };
   }
@@ -237,6 +239,61 @@
       out.push([r.id, r.pair]);
     }
     return out;
+  }
+
+  /* ---------- sliding semilandmarks ---------- */
+  /**
+   * geomorph's curves matrix from the template: [before, slide, after] as row ids. Points between two neighbours slide;
+   * an end anchored on a landmark slides towards it, a free end stays put, and a closed curve wraps round.
+   */
+  function templateSliders(rows, curves) {
+    const out = [], ids = new Set(rows.filter(r => r.type !== 'curve').map(r => r.id));
+    for (const c of curves || []) {
+      const pts = rows.filter(r => r.type === 'curve' && r.curve === c.id).sort((a, b) => a.index - b.index).map(r => r.id);
+      const m = pts.length;
+      if (!m) continue;
+      const before = c.closed ? pts[m - 1] : ids.has(c.start) ? c.start : '';
+      const after = c.closed ? pts[0] : ids.has(c.end) ? c.end : '';
+      if (c.closed && m < 3) continue;
+      pts.forEach((id, i) => {
+        const b = i ? pts[i - 1] : before, a = i < m - 1 ? pts[i + 1] : after;
+        if (b && a) out.push([b, id, a]);
+      });
+    }
+    return out;
+  }
+
+  /** A sliders file: three columns (before, slide, after) of row numbers (1-based, as geomorph) or point ids. */
+  function parseSliders(text, rows) {
+    const errors = [], sliders = [], ids = rows.map(r => r.id), sliding = new Set();
+    const lines = String(text).replace(/^\uFEFF/, '').split(/\r?\n/);
+    const point = v => {
+      if (/^\d+$/.test(v)) { const i = Number(v); return i >= 1 && i <= ids.length ? ids[i - 1] : null; }
+      return ids.includes(v) ? v : null;
+    };
+    let named = false;
+    lines.forEach((line, n) => {
+      if (!line.trim()) return;
+      let f = line.split(/[,;\t ]+/).map(v => v.trim().replace(/^"(.*)"$/, '$1')).filter((v, i, a) => v !== '' || (i === 0 && a.length === 4));
+      if (n === 0 && f.some(v => /^(before|slide|after)$/i.test(v))) { named = f.length === 4; return; }
+      if (named || f.length === 4) f = f.slice(1);
+      if (f.length !== 3) { errors.push(`line ${n + 1}: expected three columns (before, slide, after).`); return; }
+      const t = f.map(point);
+      const bad = f.filter((v, i) => !t[i]);
+      if (bad.length) { errors.push(`line ${n + 1}: no point ${bad.join(', ')} in the data.`); return; }
+      if (t[1] === t[0] || t[1] === t[2] || t[0] === t[2]) { errors.push(`line ${n + 1}: a point can’t slide between itself and a neighbour.`); return; }
+      if (sliding.has(t[1])) { errors.push(`line ${n + 1}: ${t[1]} already slides.`); return; }
+      sliding.add(t[1]);
+      sliders.push(t);
+    });
+    if (!sliders.length && !errors.length) errors.push('The file has no sliders.');
+    return { sliders, errors };
+  }
+
+  /** Sliders as geomorph's curves matrix (row numbers, 1-based), for read.csv in R. */
+  function slidersCSV(sliders, rows) {
+    const ids = rows.map(r => r.id);
+    return 'before,slide,after\n' + sliders.map(t => t.map(id => ids.indexOf(id) + 1).join(',')).join('\n') + '\n';
   }
 
   /* ---------- combining specimens into one dataset ---------- */
@@ -257,13 +314,14 @@
    */
   function assemble(all, opts) {
     opts = opts || {};
-    const out = { specimens: [], excluded: [], warnings: [], rows: [], dim: 0, units: '', needsTpsConfirm: false, templateName: '' };
+    const out = { specimens: [], excluded: [], warnings: [], rows: [], curves: [], dim: 0, units: '', needsTpsConfirm: false, templateName: '' };
     if (!all.length) return out;
     const lmk = all.filter(s => s.source === 'lmk');
     const ref = mostCommon((lmk.length ? lmk : all).map(s => s.signature));
     const model = all.find(s => s.signature === ref);
     out.dim = model.dim;
     out.rows = model.rows;
+    out.curves = model.curves || [];
     out.templateName = model.templateName;
     const n = model.rows.length;
     const exclude = (s, reason) => out.excluded.push({ id: s.id, sourceName: s.sourceName, reason });
@@ -466,5 +524,5 @@
     return { values, factors, unmatched, unused, idColumn };
   }
 
-  return { templatePairs, parseTPS, parseLmk, stem, assemble, loadFiles, zipFiles, unzipFiles, parseTable, idColumnOf, joinGroups, safeName };
+  return { templatePairs, templateSliders, parseSliders, slidersCSV, parseTPS, parseLmk, stem, assemble, loadFiles, zipFiles, unzipFiles, parseTable, idColumnOf, joinGroups, safeName };
 }));
