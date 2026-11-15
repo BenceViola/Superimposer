@@ -46,6 +46,7 @@ test('the summary table gives n, size and variance per group', async ({ page }) 
 test('pairwise distances come with permutation p-values; deep and slender fish differ', async ({ page }) => {
   await openApp(page);
   await groupsTab(page);
+  await page.click('#bFlipAll'); // the mirrored fish would otherwise swamp the difference
   const row = page.locator('#tblGroupPairs tbody tr');
   await expect(row).toHaveCount(1);
   await expect(row).toContainText('deep');
@@ -58,6 +59,7 @@ test('pairwise distances come with permutation p-values; deep and slender fish d
 test('the number of permutations can be changed, or the tests turned off', async ({ page }) => {
   await openApp(page);
   await groupsTab(page);
+  await page.click('#bFlipAll');
   await page.selectOption('#selPerms', '99');
   await expect(page.locator('#groupsTests')).toContainText('99 permutations');
   await expect(page.locator('#tblGroupPairs td.p-dist')).toHaveText(/0\.01/);

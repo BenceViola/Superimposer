@@ -18,7 +18,8 @@
     dataVersion: 0, assembledFrom: null, assembledTps: false, resKey: null, dragging: false,
     impute: { method: 'none', mirrorFirst: false, max: 3, notDone: false, ref: '' }, pairs: [], pairsFile: '',
     flip: new Set(), excludeSpecimens: new Set(), excludePoints: new Set(),
-    colour: '', labels: true, hulls: false, equal: true,
+    colour: '', labels: true, hulls: false, equal: true, groupMeans: false, ellipses: false,
+    groupOverall: false, perms: 999, groupA: '', groupB: '', groupStyle: 'arrows', groupMag: 1, groupCache: null,
     links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
     dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false, sideSort: null,
     fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0,
@@ -708,11 +709,18 @@
       super: (theme_, extra) => (!S.fitted
         ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, styles, selected, view, links, imputed, maxPoints: S.dragging ? DRAG_POINTS : undefined, theme: theme_ }, extra))
         : PL.superimposition(Object.assign({ aligned: res.gpa.aligned, consensus: res.gpa.consensus, rows: res.prep.rows, keys, groups, styles, selected, view, labels: S.labels, links, imputed, maxPoints: S.dragging ? DRAG_POINTS : undefined, editing: S.editingLinks, linkStart: startAt >= 0 ? startAt : undefined, theme: theme_ }, extra))),
-      scatter: (theme_, extra) => PL.scatter(Object.assign({}, base, { x: col(S.pcX), y: col(S.pcY), xLabel: pcName(S.pcX), yLabel: pcName(S.pcY), equal: S.equal, zeroLines: true, virtual: S.picked.filter(p => p.virtual).map(p => ({ x: p.scores[S.pcX], y: p.scores[S.pcY], label: 'Theoretical' })), theme: theme_ }, extra)),
+      groupMeans: (theme_, extra) => {
+        const info = groupInfo();
+        if (!info) return '';
+        const G = info.stats.groups;
+        return PL.groupMeans(Object.assign({ means: G.map(g => g.mean), levels: G.map(g => g.level), names: G.map(g => g.name), rows: res.prep.rows, links, view, labels: S.labels, overall: S.groupOverall ? res.gpa.consensus : null, theme: theme_ }, extra));
+      },
+      groupDiff: (theme_, extra) => (groupInfo() ? PL.shapeChange(Object.assign(groupDiffOptions(theme_), extra)) : ''),
+      scatter: (theme_, extra) => PL.scatter(Object.assign({}, base, groupMarks(groups, col(S.pcX), col(S.pcY)), { x: col(S.pcX), y: col(S.pcY), xLabel: pcName(S.pcX), yLabel: pcName(S.pcY), equal: S.equal, zeroLines: true, virtual: S.picked.filter(p => p.virtual).map(p => ({ x: p.scores[S.pcX], y: p.scores[S.pcY], label: 'Theoretical' })), theme: theme_ }, extra)),
       picked: (theme_, extra) => PL.shapeGrid({ items: pickedItems(styles.map(st => PL.colourValue(st.colour, theme_))), mean: res.gpa.consensus, rows: res.prep.rows, links, view, labels: S.labels, theme: theme_, width: extra && extra.width }),
       scree: (theme_, extra) => PL.scree(Object.assign({ proportion: res.pca.proportion, theme: theme_, height: 190 }, extra)),
       shape: (theme_, extra) => PL.shapeChange(Object.assign(shapeOptions(theme_), extra)),
-      size: (theme_, extra) => PL.scatter(Object.assign({}, base, { x: res.gpa.csize, y: col(S.sizePc), xLabel: `Centroid size (${unitWord(S.dataset.units)})`, yLabel: pcName(S.sizePc), theme: theme_ }, extra)),
+      size: (theme_, extra) => PL.scatter(Object.assign({}, base, groupMarks(groups, res.gpa.csize, col(S.sizePc)), { x: res.gpa.csize, y: col(S.sizePc), xLabel: `Centroid size (${unitWord(S.dataset.units)})`, yLabel: pcName(S.sizePc), theme: theme_ }, extra)),
       repeat: (theme_, extra) => (S.repeat.specimens.length ? PL.repeatabilityBars({ rows: S.repeat.rows.map(r => Object.assign({}, r)), units: unitWord(S.repeat.units), median: S.repeat.median, theme: theme_, width: extra && extra.width }) : ''),
     };
   }
@@ -721,13 +729,118 @@
   function liveSize(name, el) {
     const width = Math.max(300, Math.round(el.clientWidth));
     const room = Math.max(320, window.innerHeight - 190);
-    const shares = { picked: 0, super: Math.min(room, width * 0.72), scatter: Math.min(room, width * 0.74), scree: 190, shape: Math.min(room, width * 0.82), size: Math.min(room, width * 0.62), repeat: 0 };
+    const shares = { groupMeans: Math.min(room, width * 0.68), groupDiff: Math.min(room, width * 0.82), picked: 0, super: Math.min(room, width * 0.72), scatter: Math.min(room, width * 0.74), scree: 190, shape: Math.min(room, width * 0.82), size: Math.min(room, width * 0.62), repeat: 0 };
     return { width, height: Math.round(shares[name]) };
   }
 
-  const NEEDS_FIT = ['morpho', 'size'];
-  const PLOT_IDS = { picked: 'plotPicked', super: 'plotSuper', scatter: 'plotScatter', scree: 'plotScree', shape: 'plotShape', size: 'plotSize', repeat: 'plotRepeat' };
-  const tabPlots = tab => ({ super: ['super'], morpho: ['scatter', 'scree', S.shapeMode === 'picked' ? 'picked' : 'shape'], size: ['size'], repeat: ['repeat'], data: [] }[tab]);
+  const NEEDS_FIT = ['morpho', 'size', 'groups'];
+  const PLOT_IDS = { picked: 'plotPicked', super: 'plotSuper', scatter: 'plotScatter', scree: 'plotScree', shape: 'plotShape', size: 'plotSize', repeat: 'plotRepeat', groupMeans: 'plotGroupMeans', groupDiff: 'plotGroupDiff' };
+  const tabPlots = tab => ({ super: ['super'], morpho: ['scatter', 'scree', S.shapeMode === 'picked' ? 'picked' : 'shape'], size: ['size'], repeat: ['repeat'], groups: groupInfo() ? ['groupMeans', 'groupDiff'] : [], data: [] }[tab]);
+
+  /* ---------- groups ---------- */
+  /** The grouping chosen under Colour by, with its statistics. Permutations rerun only when the analysis, the groups or their number change. */
+  function groupInfo() {
+    const { res } = S;
+    if (!res || !res.ok) return null;
+    const groups = currentGroups(colourOptions());
+    if (!groups || !groups.index.some(g => g >= 0)) return null;
+    const key = [S.resKey, S.colour, groups.levels.join('\u0001'), groups.index.join(','), S.perms].join('|');
+    if (!S.groupCache || S.groupCache.key !== key) {
+      S.groupCache = { key, stats: GM.groupStats({ coords: res.gpa.tangent, csize: res.gpa.csize }, groups.index, groups.levels, { permutations: S.perms, seed: 1 }) };
+    }
+    return { groups, stats: S.groupCache.stats };
+  }
+  const ALL = 'all';
+  /** The two ends of the comparison, kept when still valid. */
+  function groupEnds(stats) {
+    const names = stats.groups.map(g => g.name), ok = v => v === ALL || names.includes(v);
+    if (!ok(S.groupA) || !ok(S.groupB) || S.groupA === S.groupB) {
+      if (names.length > 1) { S.groupA = names[0]; S.groupB = names[1]; } else { S.groupA = ALL; S.groupB = names[0]; }
+    }
+    const end = v => (v === ALL ? { label: 'all specimens', shape: S.res.gpa.consensus, level: -1 } : (g => ({ label: g.name, shape: g.mean, level: g.level }))(stats.groups[names.indexOf(v)]));
+    return { from: end(S.groupA), to: end(S.groupB) };
+  }
+  const fmtP = p => (p == null ? '—' : p < 0.001 ? '<0.001' : p.toFixed(3));
+  function renderGroupsPanel() {
+    const info = groupInfo();
+    $('groupsBody').hidden = !info;
+    const warn = [];
+    if (!info) {
+      $('groupsHint').textContent = 'Choose a grouping under Colour by (on the left) to compare groups. Group columns can be added in the Data table.';
+      $('groupsWarn').hidden = true;
+      return;
+    }
+    const { groups, stats } = info, res = S.res, th = theme();
+    $('groupsHint').textContent = `Comparing the groups of ${groups.name}: ${stats.groups.map(g => `${g.name} (${g.n})`).join(', ')}. Means come from the superimposition of all specimens.`
+      + (stats.unassigned ? ` ${plural(stats.unassigned, 'specimen')} without a group ${stats.unassigned === 1 ? 'is' : 'are'} left out.` : '');
+    const grouped = res.prep.specimens.filter((_, i) => groups.index[i] >= 0);
+    const seen = new Set();
+    if (S.replicates === 'all' && grouped.some(s => { const k = `${s.id}~${s.operator || ''}`; const dup = seen.has(k); seen.add(k); return dup; })) {
+      warn.push('Some specimens were landmarked more than once, and each replicate counts as a separate specimen. That gives them more weight and makes the p-values too small. Set Replicates to “Average per specimen”.');
+    }
+    const single = stats.groups.filter(g => g.n === 1).map(g => g.name);
+    if (single.length) warn.push(`${single.join(', ')} ${single.length === 1 ? 'has' : 'have'} a single specimen: a mean, but no variance and no meaningful test.`);
+    const small = stats.groups.filter(g => g.n > 1 && g.n < 5).map(g => g.name);
+    if (small.length) warn.push(`${small.join(', ')} ${small.length === 1 ? 'has' : 'have'} fewer than five specimens; treat the tests with care.`);
+    $('groupsWarn').hidden = !warn.length;
+    $('groupsWarn').textContent = warn.join(' ');
+    const unit = unitWord(S.dataset.units);
+    const styleOf = g => ({ colour: g.level, marker: g.level });
+    $('tblGroups').innerHTML = `<thead><tr><th>Group</th><th class="num">n</th><th class="num">Mean centroid size (${esc(unit)})</th><th class="num" title="Mean squared Procrustes distance to the group's mean">Procrustes variance</th></tr></thead><tbody>`
+      + stats.groups.map(g => `<tr><td class="gname">${PL.markerIcon(styleOf(g), th)}${esc(g.name)}</td><td class="num">${g.n}</td><td class="num">${g.csize.toPrecision(4)}</td><td class="num">${g.disparity == null ? '—' : g.disparity.toExponential(3)}</td></tr>`).join('') + '</tbody>';
+    const G = stats.groups, rows = [];
+    for (let a = 0; a < G.length; a++) for (let b = a + 1; b < G.length; b++) rows.push([a, b]);
+    const pd = (a, b) => (stats.pDistance ? stats.pDistance[a][b] : null), pv = (a, b) => (stats.pDisparity ? stats.pDisparity[a][b] : null);
+    $('tblGroupPairs').innerHTML = rows.length
+      ? '<thead><tr><th>Groups</th><th class="num" title="Procrustes distance between the group means">Distance</th><th class="num">p</th><th class="num" title="Difference in Procrustes variance">Variance diff.</th><th class="num">p</th></tr></thead><tbody>'
+        + rows.map(([a, b]) => {
+          const d = stats.distances[a][b], v = stats.disparityDiff[a][b];
+          const sd = pd(a, b) != null && pd(a, b) <= 0.05, sv = pv(a, b) != null && pv(a, b) <= 0.05;
+          return `<tr><td>${esc(G[a].name)} – ${esc(G[b].name)}</td><td class="num">${d.toFixed(4)}</td><td class="num p-dist ${sd ? 'sig' : ''}">${fmtP(pd(a, b))}</td>`
+            + `<td class="num">${v == null ? '—' : v.toExponential(2)}</td><td class="num p-var ${sv ? 'sig' : ''}">${fmtP(pv(a, b))}</td></tr>`;
+        }).join('') + '</tbody>'
+      : '<tbody><tr><td class="note">Two or more groups are needed for comparisons.</td></tr></tbody>';
+    $('selPerms').value = String(S.perms);
+    $('groupsTests').textContent = !rows.length ? '' : stats.permutations
+      ? `p: the share of ${stats.permutations} permutations (specimens shuffled among groups) giving a value at least as large, counting the data as they are (as geomorph’s pairwise and morphol.disparity). Values of 0.05 or less are in bold.`
+      : 'No permutation tests: choose a number of permutations to get p-values.';
+    groupEnds(stats); // settles the two ends before the menus show them
+    const opts = [`<option value="${ALL}">All specimens</option>`].concat(G.map(g => `<option value="${esc(g.name)}">${esc(g.name)}</option>`)).join('');
+    $('selGroupA').innerHTML = opts; $('selGroupB').innerHTML = opts;
+    $('selGroupA').value = S.groupA; $('selGroupB').value = S.groupB;
+    $('chkGroupOverall').checked = S.groupOverall;
+    $('groupStyleRow').hidden = res.prep.dim === 3;
+    $('selGroupStyle').value = S.groupStyle;
+    $('rngGroupMag').value = String(S.groupMag);
+    $('groupMagValue').textContent = `×${S.groupMag}`;
+    $('plotGroupMeans').classList.toggle('turn', res.prep.dim === 3);
+    $('plotGroupDiff').classList.toggle('turn', res.prep.dim === 3);
+  }
+  function groupDiffOptions(th) {
+    const { res } = S, { stats } = groupInfo(), { from, to } = groupEnds(stats), k = S.groupMag;
+    const target = from.shape.map((p, i) => p.map((v, d) => v + k * (to.shape[i][d] - v)));
+    return {
+      mean: from.shape, target, rows: res.prep.rows, view: res.prep.dim === 3 ? S.view : null,
+      links: LK.indexPairs(S.links, res.prep.rows),
+      warp: S.groupStyle === 'grid' && res.prep.dim === 2 ? GM.tpsWarp(from.shape, target) || undefined : undefined,
+      fromLabel: from.label, targetLabel: `${to.label}${k > 1 ? ` (×${k})` : ''}`,
+      targetColour: to.level >= 0 ? PL.colourValue(to.level, th) : undefined,
+      labels: S.labels, theme: th, width: 520, height: 430,
+    };
+  }
+  /** Group centres and ellipses for a scatter of x against y. */
+  function groupMarks(groups, x, y) {
+    if (!groups || !(S.groupMeans || S.ellipses)) return {};
+    const out = { groupMeans: [], ellipses: [] };
+    groups.levels.forEach((_, g) => {
+      const xs = [], ys = [];
+      groups.index.forEach((v, i) => { if (v === g) { xs.push(x[i]); ys.push(y[i]); } });
+      if (!xs.length) return;
+      if (S.groupMeans) out.groupMeans.push({ g, x: xs.reduce((a, b) => a + b, 0) / xs.length, y: ys.reduce((a, b) => a + b, 0) / ys.length });
+      if (S.ellipses) { const e = GM.ellipse(xs, ys, 0.95); if (e) out.ellipses.push({ g, points: e }); }
+    });
+    return out;
+  }
 
   function renderFigures() {
     const { res } = S;
@@ -741,6 +854,9 @@
     $('chkLabels').checked = S.labels;
     $('chkHulls').checked = S.hulls;
     $('chkEqual').checked = S.equal;
+    $('chkGroupMeans').checked = S.groupMeans;
+    $('chkEllipses').checked = S.ellipses;
+    if (S.tab === 'groups') renderGroupsPanel();
     const is3D = res.prep.dim === 3;
     $('plotSuper').classList.toggle('turn', is3D);
     $('plotShape').classList.toggle('turn', is3D);
@@ -844,13 +960,14 @@
       const j = IO.joinGroups(list, S.table);
       groups = { columns: j.factors.map(x => x.name), values: j.values };
     }
-    const files = EX.bundle(S.res, S.dataset, optsNow(), groups);
+    const info = groupInfo();
+    const files = EX.bundle(S.res, S.dataset, optsNow(), groups, info ? { stats: info.stats, name: info.groups.name, units: unitWord(S.dataset.units) } : undefined);
     if (S.repeat.specimens.length) files.push({ name: 'repeatability.csv', data: EX.repeatabilityCSV(S.repeat) });
     if (S.links.length) files.push({ name: 'links.csv', data: LK.toCSV(S.links) });
     save(new Blob([IO.zipFiles(files)], { type: 'application/zip' }), 'superimposer-results.zip');
   }
 
-  const FIG_NAMES = { picked: 'selected-specimens', super: 'superimposition', scatter: 'morphospace', scree: 'scree', shape: 'shape-change', size: 'size', repeat: 'repeatability' };
+  const FIG_NAMES = { groupMeans: 'group-means', groupDiff: 'group-difference', picked: 'selected-specimens', super: 'superimposition', scatter: 'morphospace', scree: 'scree', shape: 'shape-change', size: 'size', repeat: 'repeatability' };
 
   function exportFigure(name, kind) {
     const svg = figureBuilders()[name](PL.THEMES.light, { forExport: true });
@@ -1090,6 +1207,14 @@
   bindChange('chkLabels', t => { S.labels = t.checked; });
   bindChange('chkHulls', t => { S.hulls = t.checked; });
   bindChange('chkEqual', t => { S.equal = t.checked; });
+  bindChange('chkGroupMeans', t => { S.groupMeans = t.checked; });
+  bindChange('chkEllipses', t => { S.ellipses = t.checked; });
+  bindChange('chkGroupOverall', t => { S.groupOverall = t.checked; });
+  bindChange('selPerms', t => { S.perms = Number(t.value); });
+  bindChange('selGroupA', t => { if (t.value === S.groupB) S.groupB = S.groupA; S.groupA = t.value; });
+  bindChange('selGroupB', t => { if (t.value === S.groupA) S.groupA = S.groupB; S.groupB = t.value; });
+  bindChange('selGroupStyle', t => { S.groupStyle = t.value; });
+  on($('rngGroupMag'), 'input', e => { S.groupMag = Number(e.target.value); render(); });
   bindChange('selPcX', t => { S.pcX = Number(t.value); });
   bindChange('selPcY', t => { S.pcY = Number(t.value); });
   bindChange('selShapePc', t => { S.shapePc = Number(t.value); });
@@ -1218,7 +1343,7 @@
   }
 
   // Dragging turns 3D figures.
-  for (const id of ['plotSuper', 'plotShape', 'plotPicked']) {
+  for (const id of ['plotSuper', 'plotShape', 'plotPicked', 'plotGroupMeans', 'plotGroupDiff']) {
     const el = $(id);
     let last = null, queued = false;
     on(el, 'pointerdown', e => {

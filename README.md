@@ -13,11 +13,12 @@ A small browser tool for basic geometric morphometrics, made to go with [Landmar
 - **Deformation grids** (thin-plate spline, 2D) as an alternative to arrows.
 - **Specimen markers:** colour and marker follow the group, and can be changed for any specimen from the specimen list.
 - **Data table:** every record with its details, editable group columns (type, paste from a spreadsheet, or assign ticked rows; rename or remove columns), and the coordinates with gaps marked. Arrow keys move between cells, and rows are selected as in a spreadsheet (Shift-click for a range, Ctrl/⌘-click for single rows); Ctrl/⌘ + Enter fills a value into every selected row.
+- **Compares groups** (the grouping chosen under *Colour by*) in a Groups tab: group means drawn over each other, the shape change from one group mean to another (or from the mean of all specimens) as arrows or a deformation grid, a table of n, mean centroid size and Procrustes variance per group, and Procrustes distances between group means with permutation tests of the distances and of differences in variance. Group means and 95% ellipses can also be shown in the PCA and size plots.
 - **Draws links** between landmarks, by clicking them or as an automatic outline or triangulation (2D). They show on every shape figure, and can be saved as a CSV to reuse or hand out.
 - **Checks** for mirrored specimens (offers to flip them), outliers, mixed units and files that don't fit the rest.
-- **Exports** scores, aligned coordinates, consensus, eigenvalues and loadings as CSV, and figures as SVG or PNG.
+- **Exports** scores, aligned coordinates, consensus, eigenvalues and loadings as CSV (and group means, group statistics and pairwise tests when groups are chosen), and figures as SVG or PNG.
 
-Statistical tests (Procrustes ANOVA, allometry) are left to R. The exported tables are ready for it.
+Other statistical tests (Procrustes ANOVA, allometry) are left to R. The exported tables are ready for it.
 
 ## Using it
 
@@ -33,6 +34,7 @@ To colour by group, add a CSV with a specimen column (`specimen_id`, `id`, or si
 - **Semilandmarks are left out by default.** They can be included, but they are not slid yet, so such results are only exploratory.
 - **Missing landmarks** can be imputed by mirroring (paired landmarks, from the template's `bilateral_pair` or a loaded CSV), thin-plate spline, regression or mean substitution, optionally mirroring first, with a limit per specimen and a choice of reference (all complete specimens, or the same group). Only landmarks marked `missing` are imputed unless "not yet placed" is ticked. Imputed landmarks are ringed in the figures, shown in the Data table, and listed in `imputed.csv`. Gaps that are not imputed lead to leaving out the specimen (default) or the landmark.
 - **Imputation and geomorph:** the thin-plate spline matches `estimate.missing(method = "TPS")`. Regression follows `method = "Reg"`, except that the incomplete specimen is placed where a reference specimen of its size has those landmarks, rather than centred on its own; on the test data that is several times more accurate. Mean substitution shrinks variation and is there mainly for teaching.
+- **Group tests** follow geomorph: distances between group means as `pairwise(..., test.type = "dist")` on `coords ~ group`, and Procrustes variance and its differences as `morphol.disparity(coords ~ group, groups = ~ group)`. Specimens are shuffled among groups (999 times by default, with a fixed seed, so the numbers don't change between runs); p counts the observed data as one of the permutations. With the same permutations, the p-values equal geomorph's. Replicates kept as separate records count as separate specimens, which makes p-values too small: average them first. Specimens without a group are left out.
 - **y points up**, as in TPS. 2D `.lmk.json` files are flipped on import.
 - **Centroid size in pixels** is only comparable at equal magnification.
 

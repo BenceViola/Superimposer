@@ -177,3 +177,10 @@ td.why{color:var(--muted);font-size:11px}
   .side,.stage{overflow:visible}
   .morpho{grid-template-columns:minmax(0,1fr)}
 }
+/* Groups tab */
+.gtable{margin:6px 0 10px}
+.gtable td{padding:4px;border-bottom:1px solid var(--line)}
+.gtable td.gname{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.gtable td.sig{font-weight:700;color:var(--ink)}
+.gtable td.note{color:var(--muted);font-size:11.5px}
+#groupsBody[hidden]{display:none}

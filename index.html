@@ -111,6 +111,8 @@
         <label class="check"><input type="checkbox" id="chkLabels" checked> Landmark labels</label>
         <label class="check"><input type="checkbox" id="chkHulls"> Group outlines</label>
         <label class="check"><input type="checkbox" id="chkEqual" checked> Equal PC axes</label>
+        <label class="check"><input type="checkbox" id="chkGroupMeans"> Group means in PCA and size plots</label>
+        <label class="check"><input type="checkbox" id="chkEllipses"> 95% ellipses</label>
       </section>
 
       <section class="card" id="linksCard" hidden>
@@ -155,6 +157,7 @@
         <nav class="tabs" role="tablist">
           <button role="tab" data-tab="super" class="tab on" type="button">Superimposition</button>
           <button role="tab" data-tab="morpho" class="tab" type="button">Morphospace</button>
+          <button role="tab" data-tab="groups" class="tab" type="button">Groups</button>
           <button role="tab" data-tab="size" class="tab" type="button">Size</button>
           <button role="tab" data-tab="repeat" class="tab" type="button">Repeatability</button>
           <button role="tab" data-tab="data" class="tab" type="button">Data table</button>
@@ -221,6 +224,46 @@
                 <p class="hint" id="pickHint"></p>
                 <div class="plot" id="plotPicked"></div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" data-panel="groups" hidden>
+          <p class="hint" id="groupsHint"></p>
+          <p class="notice warn" id="groupsWarn" hidden></p>
+          <div class="morpho" id="groupsBody">
+            <div class="col">
+              <div class="plot-head">
+                <h3>Group means</h3>
+                <label class="check"><input type="checkbox" id="chkGroupOverall"> Mean of all specimens</label>
+                <div class="exports"><button class="btn sm" data-export="svg" data-plot="groupMeans" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="groupMeans" type="button">PNG</button></div>
+              </div>
+              <div class="plot" id="plotGroupMeans"></div>
+              <div class="tbl-wrap"><table id="tblGroups" class="gtable"></table></div>
+              <div class="plot-head">
+                <h3>Differences between groups</h3>
+                <label class="ctrls">Permutations
+                  <select id="selPerms"><option value="0">None</option><option value="99">99</option><option value="999">999</option><option value="9999">9999</option></select>
+                </label>
+              </div>
+              <div class="tbl-wrap"><table id="tblGroupPairs" class="gtable"></table></div>
+              <p class="hint" id="groupsTests"></p>
+            </div>
+            <div class="col">
+              <div class="plot-head">
+                <div class="ctrls">
+                  <label>From <select id="selGroupA"></select></label>
+                  <label>to <select id="selGroupB"></select></label>
+                </div>
+                <label class="ctrls" id="groupStyleRow">Show as
+                  <select id="selGroupStyle"><option value="arrows">Arrows</option><option value="grid">Deformation grid</option></select>
+                </label>
+                <div class="exports"><button class="btn sm" data-export="svg" data-plot="groupDiff" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="groupDiff" type="button">PNG</button></div>
+              </div>
+              <div class="plot" id="plotGroupDiff"></div>
+              <label class="field slider">Exaggerate the difference <span class="mono" id="groupMagValue">×1</span>
+                <input type="range" id="rngGroupMag" min="1" max="5" step="0.5" value="1">
+              </label>
             </div>
           </div>
         </div>
