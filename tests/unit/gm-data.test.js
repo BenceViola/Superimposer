@@ -66,8 +66,16 @@ const curveRec = (id, pts) => {
   return IO.parseLmk(d, 'x').specimens[0];
 };
 
-test('semilandmarks are left out by default', () => {
+test('semilandmarks are treated as fixed by default, and can be left out', () => {
   const p = GM.prepare(data(curveRec('A', noisy()), curveRec('B', noisy())));
+  assert.equal(p.rows.length, 6);
+  assert.equal(p.semilandmarksAvailable, 2);
+  assert.equal(p.semilandmarksUsed, 2);
+});
+
+test('semilandmarks left out (false or omit)', () => {
+  const p = GM.prepare(data(curveRec('A', noisy()), curveRec('B', noisy())), { semilandmarks: false });
+  assert.equal(GM.prepare(data(curveRec('A', noisy()), curveRec('B', noisy())), { semilandmarks: 'omit' }).rows.length, 4);
   assert.equal(p.rows.length, 4);
   assert.equal(p.semilandmarksAvailable, 2);
   assert.equal(p.semilandmarksUsed, 0);

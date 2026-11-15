@@ -142,8 +142,10 @@ test('rows: missing, not-done and estimated landmarks are counted', () => {
 test('rows: semilandmarks count only when they are in use', () => {
   const tc = tpl2d({ landmarks: t.landmarks, curves: [{ id: 'C01', name: 'c', n_points: 2 }] });
   const d = data(IO.parseLmk(doc2d('A', pts(), { template: tc }), 'a').specimens[0]);
-  assert.equal(TB.buildRows(d, null, null, new Set())[0].notDone, 0);
-  assert.equal(TB.buildRows(d, null, null, new Set(), { semilandmarks: true })[0].notDone, 2);
+  assert.equal(TB.buildRows(d, null, null, new Set())[0].notDone, 2);
+  assert.equal(TB.buildRows(d, null, null, new Set(), { semilandmarks: 'omit' })[0].notDone, 0);
+  assert.equal(TB.buildRows(d, null, null, new Set(), { semilandmarks: false })[0].notDone, 0);
+  assert.equal(TB.buildRows(d, null, null, new Set(), { semilandmarks: 'slide' })[0].notDone, 2);
 });
 
 test('rows: groups come through the usual join', () => {
