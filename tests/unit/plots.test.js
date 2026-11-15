@@ -519,3 +519,11 @@ test('maxPoints thins the clouds but keeps the consensus and every specimen’s 
 test('maxPoints larger than the data changes nothing', () => {
   assert.equal(PL.superimposition(sup({ maxPoints: 1e6 })), PL.superimposition(sup()));
 });
+
+test('superimposition: semilandmarks before sliding, in grey, with a legend entry', () => {
+  const rows = [{ id: 'A', type: 'landmark' }, { id: 'B', type: 'landmark' }, { id: 'C01_01', type: 'curve', curve: 'C01', index: 1 }, { id: 'D', type: 'landmark' }];
+  const c = [[0, 0], [1, 0], [0.5, 0.6], [0.5, 1]];
+  const s = PL.superimposition({ aligned: [c, c], consensus: c, rows, keys: ['a', 'b'], theme: PL.THEMES.light, before: [c, c], beforeRows: [2] });
+  assert.equal((s.match(/class="before-slide"/g) || []).length, 2);
+  assert.match(s, />Before sliding</);
+});
