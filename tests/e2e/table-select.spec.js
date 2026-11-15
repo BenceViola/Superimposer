@@ -55,6 +55,7 @@ test('the range keeps to the rows left by the filter', async ({ page }) => {
   await openApp(page);
   await openData(page);
   await page.fill('#dtFilter', 'slender');
+  await page.press('#dtFilter', 'Enter');
   const order = await page.locator('#dataTable tbody tr').evaluateAll(rows => rows.map(r => r.dataset.key));
   await name(page, order[0]).click();
   await name(page, order[2]).click({ modifiers: ['Shift'] });
@@ -158,6 +159,7 @@ test('Ctrl- or Cmd-A selects every row shown, outside the text cells', async ({ 
   await openApp(page);
   await openData(page);
   await page.fill('#dtFilter', 'deep');
+  await page.press('#dtFilter', 'Enter');
   const n = await page.locator('#dataTable tbody tr').count();
   await tick(page, 'EX_01').focus();
   await page.keyboard.press(`${MOD}+a`);

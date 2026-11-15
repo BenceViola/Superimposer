@@ -115,6 +115,7 @@ test('select all takes only the rows left by the filter', async ({ page }) => {
   await openApp(page);
   await example(page);
   await page.fill('#dtFilter', 'slender');
+  await page.press('#dtFilter', 'Enter');
   const n = await page.locator('#dataTable tbody tr').count();
   await page.locator('#dtSelectAll').check();
   await expect(page.locator('#dtCount')).toContainText(`${n} selected`);
@@ -127,7 +128,7 @@ test('the filter narrows the rows and keeps the typing position', async ({ page 
   await expect(page.locator('#dtFilter')).toBeFocused();
   await expect(page.locator('#dtFilter')).toHaveValue('EX_1');
   await expect(page.locator('#dataTable tbody tr')).not.toHaveCount(0);
-  expect(await page.locator('#dataTable tbody tr').count()).toBeLessThan(15);
+  await expect.poll(() => page.locator('#dataTable tbody tr').count()).toBeLessThan(15); // after the pause in typing
 });
 
 test('headings sort, and a second click reverses', async ({ page }) => {
@@ -218,6 +219,7 @@ test('the table downloads as shown, with coordinates when they are on', async ({
   await example(page);
   await page.check('#chkCoords');
   await page.fill('#dtFilter', 'EX_01');
+  await page.press('#dtFilter', 'Enter');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#bDownloadTable')]);
   expect(dl.suggestedFilename()).toBe('specimen-table.csv');
   const text = fs.readFileSync(await dl.path(), 'utf8');

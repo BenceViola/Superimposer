@@ -889,11 +889,19 @@
 
   // Data table
   // Wait for a short pause in typing, so a wide table isn't redrawn for every letter.
+  // The filter applies to the rows at once, so selecting, assigning and downloading always use the
+  // filtered rows; only the redraw waits for a pause in typing (Enter redraws at once).
   let filterTimer = 0;
+  const redrawFiltered = () => { clearTimeout(filterTimer); filterTimer = 0; $('dtWrap').scrollTop = 0; renderDataTable(); };
   on($('dtFilter'), 'input', e => {
+    S.dtFilter = e.target.value;
+    const { all, rows } = visibleRows();
+    S.dtRows = rows;
+    S.dtTotal = all.length;
     clearTimeout(filterTimer);
-    filterTimer = setTimeout(() => { S.dtFilter = e.target.value; $('dtWrap').scrollTop = 0; renderDataTable(); }, 150);
+    filterTimer = setTimeout(redrawFiltered, 150);
   });
+  on($('dtFilter'), 'keydown', e => { if (e.key === 'Enter' && filterTimer) redrawFiltered(); });
   on($('chkCoords'), 'change', e => { S.dtCoords = e.target.checked; renderDataTable(); });
   on($('dtBulkCol'), 'change', () => renderDataTable());
   on($('bLoadGroups'), 'click', () => $('fGroups').click());

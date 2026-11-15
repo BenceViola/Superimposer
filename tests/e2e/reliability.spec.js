@@ -176,3 +176,15 @@ test('the full figure is back after turning a 3D view', async ({ page }) => {
   await page.mouse.up();
   await expect.poll(dots).toBe(40 * 30);
 });
+
+test('acting straight after typing a filter uses the filtered rows', async ({ page }) => {
+  await openApp(page);
+  await loadExample(page);
+  await page.click('[data-tab="data"]');
+  await page.fill('#dtFilter', 'slender');
+  await page.locator('#dtSelectAll').check();
+  const n = await page.evaluate(() => window.__sup.S.res.prep.specimens.length);
+  const selected = await page.evaluate(() => window.__sup.S.dtSelected.size);
+  expect(selected).toBeGreaterThan(0);
+  expect(selected).toBeLessThan(n);
+});
