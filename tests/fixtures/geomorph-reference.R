@@ -52,3 +52,29 @@ out$missing <- list(
   three = holes("tests/fixtures/synthetic-3d.tps", list(list(spec = 3, lm = 5), list(spec = 11, lm = c(2, 8))))
 )
 write_json(out, "tests/fixtures/geomorph-reference.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
+
+# Groups: means, disparity and pairwise tests on the 2D set, with three arbitrary groups.
+# The permutations are exported so the unit test can repeat them exactly.
+A <- readland.tps("tests/fixtures/synthetic-2d.tps", specID = "ID", warnmsg = FALSE)
+g <- gpagen(A, print.progress = FALSE, ProcD = FALSE, Proj = TRUE, PrinAxes = TRUE)
+grp <- factor(rep(c("a", "b", "c"), times = c(10, 12, 8)))
+gdf <- geomorph.data.frame(coords = g$coords, grp = grp)
+iter <- 99
+fit <- procD.lm(coords ~ grp, data = gdf, iter = iter, seed = 7, print.progress = FALSE)
+pw <- summary(pairwise(fit, groups = grp), test.type = "dist", confidence = 0.95)
+md <- morphol.disparity(coords ~ grp, groups = ~grp, data = gdf, iter = iter, seed = 7, print.progress = FALSE)
+ind <- RRPP:::perm.index(dim(A)[3], iter = iter, seed = 7)
+means <- lapply(levels(grp), function(l) unname(apply(g$coords[, , grp == l], c(1, 2), mean)))
+out$groups <- list(
+  labels = as.character(grp),
+  coords = lapply(1:dim(A)[3], function(i) unname(g$coords[, , i])),
+  csize = unname(g$Csize),
+  means = means,
+  distances = unname(as.matrix(pw$pairwise.tables$D)),
+  p_distances = unname(as.matrix(pw$pairwise.tables$P)),
+  disparity = unname(md$Procrustes.var),
+  disparity_diff = unname(md$PV.dist),
+  p_disparity = unname(md$PV.dist.Pval),
+  perms = unname(lapply(ind[-1], function(x) x - 1))
+)
+write_json(out, "tests/fixtures/geomorph-reference.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
