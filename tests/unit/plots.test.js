@@ -527,3 +527,10 @@ test('superimposition: semilandmarks before sliding, in grey, with a legend entr
   assert.equal((s.match(/class="before-slide"/g) || []).length, 2);
   assert.match(s, />Before sliding</);
 });
+
+test('scatter: a fitted line, clipped to the data', () => {
+  const s = PL.scatter({ x: [1, 2, 3], y: [0, 1, 2], keys: ['a', 'b', 'c'], xLabel: 'x', yLabel: 'y', theme: PL.THEMES.light, line: [[1, 0], [3, 2]] });
+  const m = s.match(/<line class="fit-line" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/);
+  assert.ok(m, 'line drawn');
+  assert.ok(Number(m[1]) < Number(m[3]) && Number(m[2]) > Number(m[4]), 'rising to the right');
+});
