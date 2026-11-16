@@ -184,3 +184,7 @@ td.why{color:var(--muted);font-size:11px}
 .gtable td.sig{font-weight:700;color:var(--ink)}
 .gtable td.note{color:var(--muted);font-size:11.5px}
 #groupsBody[hidden]{display:none}
+/* Play buttons beside their sliders */
+.play-row{display:flex;align-items:flex-end;gap:10px}
+.play-row .field{flex:1}
+.play-row .play{min-width:58px;margin-bottom:6px}

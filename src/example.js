@@ -84,6 +84,9 @@
       const shape = body(depth, head, r, 0.035);
       const curve = curvePoints(shape[2], shape[3], 0.22, r, 0.02);
       const placement = [38 + 44 * r(), 0.22 * gauss(r), 300 + 600 * r(), 230 + 240 * r()];
+      // Allometry: larger fish have relatively shorter heads (snout, eye and operculum move back).
+      const shorter = 2 * Math.log(placement[0] / 60);
+      for (const j of [0, 1, 9]) shape[j][0] += shorter * (j === 0 ? 1 : 0.6);
       const mirrored = i === 6;
       const gaps = { 13: [4], 16: [1, 8], 20: [9] }[i]; // a few damaged fish, to try imputation on
       files.push({ name: `${id}.lmk.json`, data: JSON.stringify(makeDoc(id, 1, shape, curve, placement, r, 0, mirrored, gaps)) });

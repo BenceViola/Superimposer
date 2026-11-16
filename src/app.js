@@ -22,7 +22,8 @@
     groupOverall: false, perms: 999, groupA: '', groupB: '', groupStyle: 'arrows', groupMag: 1, groupCache: null,
     links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
     dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false, sideSort: null,
-    fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 0,
+    fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 'reg',
+    sizeCorrect: false, groupT: 1, alloT: 1, alloMag: 1, alloStyle: 'arrows', alloCache: null,
     picked: [], analysisSig: '', shapeMode: 'axis', shapeStyle: 'arrows', styles: {}, styleKey: null,
     view: IDENTITY.map(r => r.slice()),
   };
@@ -44,7 +45,7 @@
   /** Sliders: loaded from a file, otherwise from the template's curves. */
   const templateSlidersNow = () => (S.dataset ? IO.templateSliders(S.dataset.rows, S.dataset.curves) : []);
   const slidersNow = () => (S.sliders.length ? S.sliders : templateSlidersNow());
-  const optsNow = () => ({ impute: imputeNow(), missing: S.missing, replicates: S.replicates, semilandmarks: S.semilandmarks,
+  const optsNow = () => ({ impute: imputeNow(), missing: S.missing, replicates: S.replicates, semilandmarks: S.semilandmarks, sizeCorrect: S.sizeCorrect || undefined,
     slide: S.semilandmarks === 'slide' ? S.slide : undefined, sliders: S.semilandmarks === 'omit' || S.semilandmarks === 'slide' ? slidersNow() : undefined, flip: S.flip, excludeSpecimens: S.excludeSpecimens, excludePoints: S.excludePoints });
   const theme = () => {
     const forced = document.documentElement.dataset.theme;
@@ -60,6 +61,7 @@
   }
 
   function rerun() {
+    stopAnimation();
     if (S.all !== S.assembledFrom || S.confirmTps !== S.assembledTps) {
       S.dataset = IO.assemble(S.all, { confirmTps: S.confirmTps });
       S.assembledFrom = S.all;
@@ -734,6 +736,17 @@
     const selected = S.picked.filter(p => !p.virtual).map(p => p.key);
     const base = { keys, selected, styles, groups, outliers: res.outliers, tips: tip, hulls: S.hulls, rings };
     const col = c => res.pca.scores.map(r => r[c]);
+    const sizeRegression = (theme_, extra) => {
+      const a = res.allometry;
+      if (!a) return '';
+      const xm = a.logSize.reduce((q, v) => q + v, 0) / a.n;
+      let bl = 0;
+      for (const p of a.slope) for (const v of p) bl += v * v;
+      bl = Math.sqrt(bl);
+      const line = [[a.range[0], bl * (a.range[0] - xm)], [a.range[1], bl * (a.range[1] - xm)]];
+      return PL.scatter(Object.assign({}, base, groupMarks(groups, a.logSize, a.score), { x: a.logSize, y: a.score, line,
+        xLabel: `log centroid size (${unitWord(S.dataset.units)})`, yLabel: 'Regression score (shape on log size)', theme: theme_ }, extra));
+    };
     return {
       super: (theme_, extra) => (!S.fitted
         ? PL.rawData(Object.assign({ matrix: GM.rawCoords(res.prep), keys, groups, styles, selected, view, links, imputed, maxPoints: S.dragging ? DRAG_POINTS : undefined, theme: theme_ }, extra))
@@ -749,7 +762,8 @@
       picked: (theme_, extra) => PL.shapeGrid({ items: pickedItems(styles.map(st => PL.colourValue(st.colour, theme_))), mean: res.gpa.consensus, rows: res.prep.rows, links, view, labels: S.labels, theme: theme_, width: extra && extra.width }),
       scree: (theme_, extra) => PL.scree(Object.assign({ proportion: res.pca.proportion, theme: theme_, height: 190 }, extra)),
       shape: (theme_, extra) => PL.shapeChange(Object.assign(shapeOptions(theme_), extra)),
-      size: (theme_, extra) => PL.scatter(Object.assign({}, base, groupMarks(groups, res.gpa.csize, col(S.sizePc)), { x: res.gpa.csize, y: col(S.sizePc), xLabel: `Centroid size (${unitWord(S.dataset.units)})`, yLabel: pcName(S.sizePc), theme: theme_ }, extra)),
+      allo: (theme_, extra) => (res.allometry ? PL.shapeChange(Object.assign(alloOptions(theme_), extra)) : ''),
+      size: (theme_, extra) => (S.sizePc === 'reg' ? sizeRegression(theme_, extra) : PL.scatter(Object.assign({}, base, groupMarks(groups, res.gpa.csize, col(S.sizePc)), { x: res.gpa.csize, y: col(S.sizePc), xLabel: `Centroid size (${unitWord(S.dataset.units)})`, yLabel: pcName(S.sizePc), theme: theme_ }, extra))),
       repeat: (theme_, extra) => (S.repeat.specimens.length ? PL.repeatabilityBars({ rows: S.repeat.rows.map(r => Object.assign({}, r)), units: unitWord(S.repeat.units), median: S.repeat.median, theme: theme_, width: extra && extra.width }) : ''),
     };
   }
@@ -758,13 +772,98 @@
   function liveSize(name, el) {
     const width = Math.max(300, Math.round(el.clientWidth));
     const room = Math.max(320, window.innerHeight - 190);
-    const shares = { groupMeans: Math.min(room, width * 0.68), groupDiff: Math.min(room, width * 0.82), picked: 0, super: Math.min(room, width * 0.72), scatter: Math.min(room, width * 0.74), scree: 190, shape: Math.min(room, width * 0.82), size: Math.min(room, width * 0.62), repeat: 0 };
+    const shares = { allo: Math.min(room, width * 0.82), groupMeans: Math.min(room, width * 0.68), groupDiff: Math.min(room, width * 0.82), picked: 0, super: Math.min(room, width * 0.72), scatter: Math.min(room, width * 0.74), scree: 190, shape: Math.min(room, width * 0.82), size: Math.min(room, width * 0.62), repeat: 0 };
     return { width, height: Math.round(shares[name]) };
   }
 
   const NEEDS_FIT = ['morpho', 'size', 'groups'];
-  const PLOT_IDS = { picked: 'plotPicked', super: 'plotSuper', scatter: 'plotScatter', scree: 'plotScree', shape: 'plotShape', size: 'plotSize', repeat: 'plotRepeat', groupMeans: 'plotGroupMeans', groupDiff: 'plotGroupDiff' };
-  const tabPlots = tab => ({ super: ['super'], morpho: ['scatter', 'scree', S.shapeMode === 'picked' ? 'picked' : 'shape'], size: ['size'], repeat: ['repeat'], groups: groupInfo() ? ['groupMeans', 'groupDiff'] : [], data: [] }[tab]);
+  const PLOT_IDS = { allo: 'plotAllo', picked: 'plotPicked', super: 'plotSuper', scatter: 'plotScatter', scree: 'plotScree', shape: 'plotShape', size: 'plotSize', repeat: 'plotRepeat', groupMeans: 'plotGroupMeans', groupDiff: 'plotGroupDiff' };
+  const tabPlots = tab => ({ super: ['super'], morpho: ['scatter', 'scree', S.shapeMode === 'picked' ? 'picked' : 'shape'], size: S.res && S.res.allometry ? ['size', 'allo'] : ['size'], repeat: ['repeat'], groups: groupInfo() ? ['groupMeans', 'groupDiff'] : [], data: [] }[tab]);
+
+  /* ---------- allometry ---------- */
+  /** The allometry with its permutation test; computed for the Size tab and the download only. */
+  function alloInfo() {
+    const { res } = S;
+    if (!res || !res.ok || !res.allometry) return null;
+    if (!S.alloCache || S.alloCache.key !== S.resKey) {
+      S.alloCache = { key: S.resKey, a: GM.allometry({ tangent: res.gpa.tangent, csize: res.gpa.csize }, { permutations: 999, seed: 1 }) };
+    }
+    return S.alloCache.a;
+  }
+  function alloOptions(th) {
+    const { res } = S, a = res.allometry;
+    const xm = a.logSize.reduce((q, v) => q + v, 0) / a.n;
+    const reach = S.alloT >= 0 ? a.range[1] - xm : a.range[0] - xm;
+    const L = xm + Math.abs(S.alloT) * reach * S.alloMag;
+    const target = a.predict(L);
+    const unit = unitWord(S.dataset.units);
+    const end = S.alloMag === 1 && Math.abs(S.alloT) === 1 ? `the size of the ${S.alloT > 0 ? 'largest' : 'smallest'} specimen` : `centroid size ${Math.exp(L).toPrecision(3)} ${unit}${S.alloMag > 1 ? ` (×${S.alloMag})` : ''}`;
+    return {
+      mean: a.mean, target, rows: res.prep.rows, view: res.prep.dim === 3 ? S.view : null,
+      links: LK.indexPairs(S.links, res.prep.rows),
+      warp: S.alloStyle === 'grid' && res.prep.dim === 2 ? GM.tpsWarp(a.mean, target) || undefined : undefined,
+      fromLabel: 'the mean shape', targetLabel: end,
+      labels: S.labels, theme: th, width: 520, height: 430,
+    };
+  }
+  function renderSizePanel() {
+    const { res } = S, a = alloInfo();
+    $('selSizePc').innerHTML = `<option value="reg">Regression score (shape on log size)</option>`
+      + Array.from({ length: Math.min(res.pca.values.length, 12) }, (_, i) => `<option value="${i}">${pcName(i)}</option>`).join('');
+    $('selSizePc').value = String(S.sizePc);
+    $('alloStats').textContent = a
+      ? `Shape on log centroid size: R² = ${a.rsq.toFixed(3)} (size accounts for ${(a.rsq * 100).toFixed(1)}% of shape variation), F = ${a.f.toFixed(2)}, p = ${fmtP(a.p)} (${a.permutations} permutations), as geomorph’s procD.lm(coords ~ log(Csize)). Specimens of all groups are pooled.`
+      : 'Allometry needs at least three specimens of different sizes.';
+    $('selAlloStyle').value = S.alloStyle;
+    $('alloStyleRow').hidden = res.prep.dim === 3;
+    $('rngAllo').value = String(S.alloT);
+    $('rngAlloMag').value = String(S.alloMag);
+    $('alloMagValue').textContent = `×${S.alloMag}`;
+    $('plotAllo').classList.toggle('turn', res.prep.dim === 3);
+  }
+
+  /* ---------- animation ---------- */
+  // A play button moves a slider back and forth; only that slider's figure is redrawn on each frame.
+  const ANIM = {
+    shape: { key: 'shapeT', min: -1, max: 1, input: 'rngShape', button: 'bPlayShape', plots: ['shape'], tab: 'morpho' },
+    group: { key: 'groupT', min: 0, max: 1, input: 'rngGroupT', button: 'bPlayGroup', plots: ['groupDiff'], tab: 'groups' },
+    allo: { key: 'alloT', min: -1, max: 1, input: 'rngAllo', button: 'bPlayAllo', plots: ['allo'], tab: 'size' },
+  };
+  const PERIOD = 4000; // ms for a full swing there and back
+  let playing = null;
+  function stopAnimation() {
+    if (!playing) return;
+    cancelAnimationFrame(playing.frame);
+    $(ANIM[playing.name].button).textContent = 'Play';
+    playing = null;
+  }
+  function redrawPlots(names) {
+    const build = figureBuilders(), th = theme();
+    for (const name of names) {
+      const el = $(PLOT_IDS[name]);
+      el.innerHTML = build[name](th, liveSize(name, el));
+    }
+  }
+  function toggleAnimation(name) {
+    if (playing && playing.name === name) { stopAnimation(); return; }
+    stopAnimation();
+    const a = ANIM[name], mid = (a.min + a.max) / 2, amp = (a.max - a.min) / 2;
+    const v0 = Math.max(a.min, Math.min(a.max, S[a.key]));
+    const phase0 = Math.acos(Math.max(-1, Math.min(1, (mid - v0) / amp)));
+    const t0 = performance.now();
+    playing = { name, frame: 0 };
+    $(a.button).textContent = 'Pause';
+    const step = now => {
+      if (!playing || playing.name !== name) return;
+      if (S.tab !== a.tab || !S.res || !S.res.ok) { stopAnimation(); return; }
+      const v = mid - amp * Math.cos(phase0 + (2 * Math.PI * (now - t0)) / PERIOD);
+      S[a.key] = Math.round(v * 1000) / 1000;
+      $(a.input).value = String(S[a.key]);
+      try { redrawPlots(a.plots); } catch (e) { stopAnimation(); throw e; }
+      playing.frame = requestAnimationFrame(step);
+    };
+    playing.frame = requestAnimationFrame(step);
+  }
 
   /* ---------- groups ---------- */
   /** The grouping chosen under Colour by, with its statistics. Permutations rerun only when the analysis, the groups or their number change. */
@@ -841,18 +940,19 @@
     $('groupStyleRow').hidden = res.prep.dim === 3;
     $('selGroupStyle').value = S.groupStyle;
     $('rngGroupMag').value = String(S.groupMag);
+    $('rngGroupT').value = String(S.groupT);
     $('groupMagValue').textContent = `×${S.groupMag}`;
     $('plotGroupMeans').classList.toggle('turn', res.prep.dim === 3);
     $('plotGroupDiff').classList.toggle('turn', res.prep.dim === 3);
   }
   function groupDiffOptions(th) {
     const { res } = S, { stats } = groupInfo(), { from, to } = groupEnds(stats), k = S.groupMag;
-    const target = from.shape.map((p, i) => p.map((v, d) => v + k * (to.shape[i][d] - v)));
+    const target = from.shape.map((p, i) => p.map((v, d) => v + k * S.groupT * (to.shape[i][d] - v)));
     return {
       mean: from.shape, target, rows: res.prep.rows, view: res.prep.dim === 3 ? S.view : null,
       links: LK.indexPairs(S.links, res.prep.rows),
       warp: S.groupStyle === 'grid' && res.prep.dim === 2 ? GM.tpsWarp(from.shape, target) || undefined : undefined,
-      fromLabel: from.label, targetLabel: `${to.label}${k > 1 ? ` (×${k})` : ''}`,
+      fromLabel: from.label, targetLabel: `${S.groupT < 1 ? `${Math.round(S.groupT * 100)}% of the way to ` : ''}${to.label}${k > 1 ? ` (×${k})` : ''}`,
       targetColour: to.level >= 0 ? PL.colourValue(to.level, th) : undefined,
       labels: S.labels, theme: th, width: 520, height: 430,
     };
@@ -876,7 +976,6 @@
     fillPcSelect('selPcX', S.pcX);
     fillPcSelect('selPcY', S.pcY);
     fillPcSelect('selShapePc', S.shapePc);
-    fillPcSelect('selSizePc', S.sizePc);
     $('rngShape').value = String(S.shapeT);
     $('rngMag').value = String(S.mag);
     $('magValue').textContent = `×${S.mag}`;
@@ -886,6 +985,10 @@
     $('chkGroupMeans').checked = S.groupMeans;
     $('chkEllipses').checked = S.ellipses;
     if (S.tab === 'groups') renderGroupsPanel();
+    if (S.tab === 'size') renderSizePanel();
+    $('chkSizeCorrect').checked = S.sizeCorrect;
+    $('morphoNote').hidden = !res.pca.sizeCorrected;
+    $('morphoNote').textContent = 'PCA on size-corrected shapes (allometry removed): the residuals of shape on log centroid size, added to the mean. The shapes along the axes leave out the shape change with size.';
     const is3D = res.prep.dim === 3;
     $('plotSuper').classList.toggle('turn', is3D);
     $('plotShape').classList.toggle('turn', is3D);
@@ -992,13 +1095,14 @@
       groups = { columns: j.factors.map(x => x.name), values: j.values };
     }
     const info = groupInfo();
-    const files = EX.bundle(S.res, S.dataset, optsNow(), groups, info ? { stats: info.stats, name: info.groups.name, units: unitWord(S.dataset.units) } : undefined);
+    const a = alloInfo();
+    const files = EX.bundle(a ? Object.assign({}, S.res, { allometry: a }) : S.res, S.dataset, optsNow(), groups, info ? { stats: info.stats, name: info.groups.name, units: unitWord(S.dataset.units) } : undefined);
     if (S.repeat.specimens.length) files.push({ name: 'repeatability.csv', data: EX.repeatabilityCSV(S.repeat) });
     if (S.links.length) files.push({ name: 'links.csv', data: LK.toCSV(S.links) });
     save(new Blob([IO.zipFiles(files)], { type: 'application/zip' }), 'superimposer-results.zip');
   }
 
-  const FIG_NAMES = { groupMeans: 'group-means', groupDiff: 'group-difference', picked: 'selected-specimens', super: 'superimposition', scatter: 'morphospace', scree: 'scree', shape: 'shape-change', size: 'size', repeat: 'repeatability' };
+  const FIG_NAMES = { allo: 'allometry-shape', groupMeans: 'group-means', groupDiff: 'group-difference', picked: 'selected-specimens', super: 'superimposition', scatter: 'morphospace', scree: 'scree', shape: 'shape-change', size: 'size', repeat: 'repeatability' };
 
   function exportFigure(name, kind) {
     const svg = figureBuilders()[name](PL.THEMES.light, { forExport: true });
@@ -1265,17 +1369,23 @@
   bindChange('selPcY', t => { S.pcY = Number(t.value); });
   bindChange('selShapePc', t => { S.shapePc = Number(t.value); });
   bindChange('selShapeStyle', t => { S.shapeStyle = t.value; });
-  bindChange('selSizePc', t => { S.sizePc = Number(t.value); });
+  bindChange('selSizePc', t => { S.sizePc = t.value === 'reg' ? 'reg' : Number(t.value); });
+  bindChange('chkSizeCorrect', t => { S.sizeCorrect = t.checked; });
+  bindChange('selAlloStyle', t => { S.alloStyle = t.value; });
+  on($('rngAlloMag'), 'input', e => { S.alloMag = Number(e.target.value); render(); });
+  for (const [name, a] of Object.entries(ANIM)) {
+    on($(a.button), 'click', () => toggleAnimation(name));
+    on($(a.input), 'input', e => { stopAnimation(); S[a.key] = Number(e.target.value); render(); });
+  }
   document.querySelectorAll('.segb').forEach(b => on(b, 'click', () => { S.shapeMode = b.dataset.shape; render(); }));
   on($('bClearPicks'), 'click', () => { S.picked = []; render(); });
   on($('pickChips'), 'click', e => {
     const b = e.target.closest('button[data-i]');
     if (b) { S.picked.splice(Number(b.dataset.i), 1); render(); }
   });
-  on($('rngShape'), 'input', e => { S.shapeT = Number(e.target.value); render(); });
   on($('rngMag'), 'input', e => { S.mag = Number(e.target.value); render(); });
 
-  document.querySelectorAll('.tab').forEach(b => on(b, 'click', () => { S.tab = b.dataset.tab; render(); }));
+  document.querySelectorAll('.tab').forEach(b => on(b, 'click', () => { stopAnimation(); S.tab = b.dataset.tab; render(); }));
   document.querySelectorAll('[data-export]').forEach(b => on(b, 'click', () => exportFigure(b.dataset.plot, b.dataset.export)));
 
   on($('tblSpecimens'), 'change', e => {
@@ -1389,7 +1499,7 @@
   }
 
   // Dragging turns 3D figures.
-  for (const id of ['plotSuper', 'plotShape', 'plotPicked', 'plotGroupMeans', 'plotGroupDiff']) {
+  for (const id of ['plotSuper', 'plotShape', 'plotPicked', 'plotGroupMeans', 'plotGroupDiff', 'plotAllo']) {
     const el = $(id);
     let last = null, queued = false;
     on(el, 'pointerdown', e => {

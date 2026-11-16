@@ -104,6 +104,7 @@
             <option value="average">Average per specimen</option>
           </select>
         </label>
+        <label class="check" title="Run the PCA on the residuals of shape on log centroid size, added to the mean"><input type="checkbox" id="chkSizeCorrect"> Remove allometry from the PCA</label>
         <label class="field" id="semiRow">Semilandmarks
           <select id="selSemi">
             <option value="fixed">Treat as fixed landmarks</option>
@@ -194,6 +195,7 @@
         </div>
 
         <div class="panel" data-panel="morpho" hidden>
+          <p class="hint" id="morphoNote" hidden></p>
           <div class="morpho">
             <div class="col">
               <div class="plot-head">
@@ -227,9 +229,12 @@
                   <div class="exports"><button class="btn sm" data-export="svg" data-plot="shape" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="shape" type="button">PNG</button></div>
                 </div>
                 <div class="plot" id="plotShape"></div>
-                <label class="field slider">Position on the axis, from its lowest to its highest specimen
-                  <input type="range" id="rngShape" min="-1" max="1" step="0.01" value="1">
-                </label>
+                <div class="play-row">
+                  <button class="btn sm play" id="bPlayShape" type="button">Play</button>
+                  <label class="field slider">Position on the axis, from its lowest to its highest specimen
+                    <input type="range" id="rngShape" min="-1" max="1" step="0.01" value="1">
+                  </label>
+                </div>
                 <label class="field slider">Exaggerate the change <span class="mono" id="magValue">×1</span>
                   <input type="range" id="rngMag" min="1" max="5" step="0.5" value="1">
                 </label>
@@ -282,6 +287,12 @@
                 <div class="exports"><button class="btn sm" data-export="svg" data-plot="groupDiff" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="groupDiff" type="button">PNG</button></div>
               </div>
               <div class="plot" id="plotGroupDiff"></div>
+              <div class="play-row">
+                <button class="btn sm play" id="bPlayGroup" type="button">Play</button>
+                <label class="field slider">Position, from the first mean to the second
+                  <input type="range" id="rngGroupT" min="0" max="1" step="0.01" value="1">
+                </label>
+              </div>
               <label class="field slider">Exaggerate the difference <span class="mono" id="groupMagValue">×1</span>
                 <input type="range" id="rngGroupMag" min="1" max="5" step="0.5" value="1">
               </label>
@@ -290,12 +301,36 @@
         </div>
 
         <div class="panel" data-panel="size" hidden>
-          <div class="plot-head">
-            <div class="ctrls"><label>Against <select id="selSizePc"></select></label></div>
-            <div class="exports"><button class="btn sm" data-export="svg" data-plot="size" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="size" type="button">PNG</button></div>
-          </div>
           <p class="notice warn" id="sizeWarn" hidden></p>
-          <div class="plot" id="plotSize"></div>
+          <div class="morpho">
+            <div class="col">
+              <div class="plot-head">
+                <div class="ctrls"><label>Size against <select id="selSizePc"></select></label></div>
+                <div class="exports"><button class="btn sm" data-export="svg" data-plot="size" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="size" type="button">PNG</button></div>
+              </div>
+              <div class="plot" id="plotSize"></div>
+              <p class="hint" id="alloStats"></p>
+            </div>
+            <div class="col">
+              <div class="plot-head">
+                <h3>Shape change with size</h3>
+                <label class="ctrls" id="alloStyleRow">Show as
+                  <select id="selAlloStyle"><option value="arrows">Arrows</option><option value="grid">Deformation grid</option></select>
+                </label>
+                <div class="exports"><button class="btn sm" data-export="svg" data-plot="allo" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="allo" type="button">PNG</button></div>
+              </div>
+              <div class="plot" id="plotAllo"></div>
+              <div class="play-row">
+                <button class="btn sm play" id="bPlayAllo" type="button">Play</button>
+                <label class="field slider">Size, from the smallest specimen to the largest (predicted shape)
+                  <input type="range" id="rngAllo" min="-1" max="1" step="0.01" value="1">
+                </label>
+              </div>
+              <label class="field slider">Exaggerate the change <span class="mono" id="alloMagValue">×1</span>
+                <input type="range" id="rngAlloMag" min="1" max="5" step="0.5" value="1">
+              </label>
+            </div>
+          </div>
         </div>
 
         <div class="panel" data-panel="data" hidden>
