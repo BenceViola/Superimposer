@@ -1054,6 +1054,250 @@
     return out;
   }
 
+  /* ---------- linear models with residual randomisation (RRPP) ---------- */
+  /**
+   * Shapes as rows of a matrix with the same inner products (so the same sums of squares, distances and angles),
+   * but at most n - 1 columns: the centred data, or their principal component scores when that is smaller.
+   */
+  function compactRows(rows) {
+    const n = rows.length, m = rows[0].length;
+    const mean = new Float64Array(m);
+    for (const r of rows) for (let j = 0; j < m; j++) mean[j] += r[j] / n;
+    const Yc = rows.map(r => { const c = new Float64Array(m); for (let j = 0; j < m; j++) c[j] = r[j] - mean[j]; return c; });
+    if (m <= n) return Yc;
+    const G = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let a = 0; a < n; a++) for (let b = a; b < n; b++) { let t = 0; const ya = Yc[a], yb = Yc[b]; for (let j = 0; j < m; j++) t += ya[j] * yb[j]; G[a][b] = G[b][a] = t; }
+    const { values, vectors } = symEig(G);
+    const top = values[0] || 0, keep = [];
+    values.forEach((v, c) => { if (v > 1e-12 * top && v > 1e-30) keep.push(c); });
+    return Yc.map((_, i) => Float64Array.from(keep, c => vectors[i][c] * Math.sqrt(values[c])));
+  }
+
+  /** Orthonormal columns (modified Gram–Schmidt) for design columns given term by term; dependent columns are dropped. */
+  function orthoTerms(terms, n) {
+    const Q = [], ends = [];
+    for (const cols of terms) {
+      for (const col of cols) {
+        const v = Float64Array.from(col);
+        let norm0 = 0;
+        for (let i = 0; i < n; i++) norm0 += v[i] * v[i];
+        for (const q of Q) { let d = 0; for (let i = 0; i < n; i++) d += q[i] * v[i]; for (let i = 0; i < n; i++) v[i] -= d * q[i]; }
+        let norm = 0;
+        for (let i = 0; i < n; i++) norm += v[i] * v[i];
+        if (norm > 1e-20 * Math.max(norm0, 1e-300) && norm > 1e-300) { const s = 1 / Math.sqrt(norm); for (let i = 0; i < n; i++) v[i] *= s; Q.push(v); }
+      }
+      ends.push(Q.length);
+    }
+    return { Q, ends };
+  }
+
+  /** Coefficients of Y on the first `upto` orthonormal columns: W[c] = q_c' Y. */
+  function project(Q, upto, Y) {
+    const r = Y[0].length, W = [];
+    for (let c = 0; c < upto; c++) {
+      const w = new Float64Array(r), q = Q[c];
+      for (let i = 0; i < Y.length; i++) { const qi = q[i]; if (qi) { const y = Y[i]; for (let j = 0; j < r; j++) w[j] += qi * y[j]; } }
+      W.push(w);
+    }
+    return W;
+  }
+  /** Fitted values and residuals of Y on the first `upto` orthonormal columns. */
+  function fitOn(Q, upto, Y) {
+    const W = project(Q, upto, Y), r = Y[0].length;
+    const F = Y.map((_, i) => { const f = new Float64Array(r); for (let c = 0; c < upto; c++) { const qi = Q[c][i]; if (qi) { const w = W[c]; for (let j = 0; j < r; j++) f[j] += qi * w[j]; } } return f; });
+    const E = Y.map((y, i) => { const e = new Float64Array(r); for (let j = 0; j < r; j++) e[j] = y[j] - F[i][j]; return e; });
+    return { F, E };
+  }
+  const sumSq = W => { let t = 0; for (const w of W) for (let j = 0; j < w.length; j++) t += w[j] * w[j]; return t; };
+  /** Y* = F + E[perm] (row i takes the residual of row perm[i]), as RRPP. */
+  function permuted(F, E, perm, out) {
+    const r = F[0].length;
+    for (let i = 0; i < F.length; i++) { const f = F[i], e = E[perm[i]], o = out[i]; for (let j = 0; j < r; j++) o[j] = f[j] + e[j]; }
+    return out;
+  }
+
+  /**
+   * Sequential (type I) sums of squares with RRPP, as procD.lm: each term is tested by permuting the residuals
+   * of the model without it (and the terms after it); F uses the residuals of the whole model.
+   */
+  function anovaTable(Y, design, names, perms) {
+    const n = Y.length, r = Y[0].length;
+    const { Q, ends } = orthoTerms(design, n);
+    const all = ends[ends.length - 1];
+    const total = sumSq(Y), Wobs = project(Q, all, Y);
+    const dfRes = n - all;
+    const rssObs = total - sumSq(Wobs);
+    const scratch = Y.map(() => new Float64Array(r));
+    // design[0] is the intercept; names belong to design[1], design[2], …
+    const terms = names.map((name, t) => {
+      const lo = ends[t], hi = ends[t + 1];
+      const df = hi - lo, ss = sumSq(Wobs.slice(lo, hi));
+      const f = df > 0 && rssObs > 0 ? (ss / df) / (rssObs / dfRes) : null;
+      const row = { name, df, ss, rsq: total > 0 ? ss / total : 0, f, p: null };
+      if (perms && perms.length && f != null) {
+        const { F, E } = fitOn(Q, lo, Y);
+        let hits = 1;
+        for (const perm of perms) {
+          const Ys = permuted(F, E, perm, scratch);
+          const W = project(Q, all, Ys);
+          const ssP = sumSq(W.slice(lo, hi)), rss = sumSq(Ys) - sumSq(W);
+          const fP = (ssP / df) / (rss / dfRes);
+          if (fP >= f - 1e-10 * Math.abs(f)) hits++;
+        }
+        row.p = hits / (perms.length + 1);
+      }
+      return row;
+    });
+    return { terms, residual: { df: dfRes, ss: rssObs }, total: { df: n - 1, ss: total }, Q, ends };
+  }
+
+  /**
+   * Allometry by groups, as geomorph/RRPP: common slope (shape ~ log size + group) and separate slopes
+   * (shape ~ log size * group); the test of slopes (the interaction, as anova(common, separate)); angles between
+   * group slopes and differences in their length (pairwise(separate, groups, covariate)); distances between
+   * size-adjusted group means (pairwise(common, groups)). Groups need three specimens of different sizes.
+   * index: a level index per specimen, or -1. opts: permutations (999), seed, or perms (explicit, for tests).
+   */
+  function allometryByGroups(fit, index, levels, opts) {
+    opts = opts || {};
+    const notes = [];
+    const logAll = fit.csize.map(Math.log);
+    const members = levels.map(() => []);
+    index.forEach((g, i) => { if (g >= 0 && g < levels.length) members[g].push(i); });
+    const usable = [];
+    members.forEach((list, g) => {
+      if (!list.length) return;
+      let lo = Infinity, hi = -Infinity;
+      for (const i of list) { lo = Math.min(lo, logAll[i]); hi = Math.max(hi, logAll[i]); }
+      if (list.length < 3 || !(hi - lo > 1e-9)) notes.push(`${levels[g]} left out of the allometry by groups: it needs at least three specimens of different sizes.`);
+      else usable.push(g);
+    });
+    if (usable.length < 2) return null;
+    const used = [], lab = [];
+    index.forEach((g, i) => { const k = usable.indexOf(g); if (k >= 0) { used.push(i); lab.push(k); } });
+    const n = used.length, K = usable.length;
+    const x = used.map(i => logAll[i]);
+    const shape = fit.tangent[0], p = shape.length, k = shape[0].length, m = p * k;
+    const rows = used.map(i => { const c = fit.tangent[i], v = new Float64Array(m); for (let a = 0; a < p; a++) for (let d = 0; d < k; d++) v[a * k + d] = c[a][d]; return v; });
+    const Y = compactRows(rows);
+    const one = new Array(n).fill(1);
+    const dummies = [], inter = [];
+    for (let g = 1; g < K; g++) { dummies.push(lab.map(v => (v === g ? 1 : 0))); inter.push(lab.map((v, i) => (v === g ? x[i] : 0))); }
+
+    let perms = opts.perms;
+    if (!perms) {
+      const count = opts.permutations == null ? 999 : opts.permutations, random = seeded(opts.seed == null ? 1 : opts.seed);
+      perms = Array.from({ length: count }, () => shuffled(n, random));
+    }
+    const strip = t => ({ terms: t.terms, residual: t.residual, total: t.total });
+    const commonOut = strip(anovaTable(Y, [[one], [x], dummies], ['size', 'group'], perms));
+    const uniqueOut = strip(anovaTable(Y, [[one], [x], dummies, inter], ['size', 'group', 'size × group'], perms));
+
+    // Group summaries along x.
+    const stats = (Ys, out) => {
+      // per group: mean x, Sxx, mean Y, slope vector; pooled within-group slope
+      const r = Ys[0].length;
+      const gx = new Float64Array(K), gn = new Float64Array(K), sxx = new Float64Array(K);
+      const gy = Array.from({ length: K }, () => new Float64Array(r)), sxy = Array.from({ length: K }, () => new Float64Array(r));
+      for (let i = 0; i < n; i++) { gx[lab[i]] += x[i]; gn[lab[i]]++; }
+      for (let g = 0; g < K; g++) gx[g] /= gn[g];
+      for (let i = 0; i < n; i++) { const g = lab[i], y = Ys[i], my = gy[g]; for (let j = 0; j < r; j++) my[j] += y[j] / gn[g]; }
+      for (let i = 0; i < n; i++) {
+        const g = lab[i], dx = x[i] - gx[g], y = Ys[i], my = gy[g], s = sxy[g];
+        sxx[g] += dx * dx;
+        for (let j = 0; j < r; j++) s[j] += dx * (y[j] - my[j]);
+      }
+      out.gx = gx; out.gn = gn; out.gy = gy;
+      out.slopes = sxy.map((s, g) => s.map(v => v / sxx[g]));
+      let tx = 0;
+      for (let g = 0; g < K; g++) tx += sxx[g];
+      const pooled = new Float64Array(r);
+      for (let g = 0; g < K; g++) for (let j = 0; j < r; j++) pooled[j] += sxy[g][j] / tx;
+      out.pooled = pooled;
+      return out;
+    };
+    const adjustAt = x.reduce((t, v) => t + v, 0) / n; // the mean log size, as RRPP
+    const pairStats = st => {
+      const len = st.slopes.map(b => Math.sqrt(b.reduce((t, v) => t + v * v, 0)));
+      const angle = [], lengthDiff = [], lsDist = [];
+      for (let a = 0; a < K; a++) {
+        angle.push([]); lengthDiff.push([]); lsDist.push([]);
+        for (let b = 0; b < K; b++) {
+          let dot = 0, dd = 0;
+          const ba = st.slopes[a], bb = st.slopes[b];
+          for (let j = 0; j < ba.length; j++) {
+            dot += ba[j] * bb[j];
+            const dm = st.gy[a][j] - st.gy[b][j] - st.pooled[j] * (st.gx[a] - st.gx[b]);
+            dd += dm * dm;
+          }
+          const cos = len[a] && len[b] ? Math.max(-1, Math.min(1, dot / (len[a] * len[b]))) : 1;
+          angle[a].push(a === b ? 0 : (Math.acos(cos) * 180) / Math.PI);
+          lengthDiff[a].push(Math.abs(len[a] - len[b]));
+          lsDist[a].push(Math.sqrt(dd));
+        }
+      }
+      return { angle, lengthDiff, lsDist, len };
+    };
+    const obs = pairStats(stats(Y, {}));
+    const pairs = f => Array.from({ length: K }, (_, a) => Array.from({ length: K }, (_, b) => f(a, b)));
+    let pAngle = null, pLength = null, pLsmean = null;
+    if (perms.length) {
+      const hitA = pairs(() => 1), hitL = pairs(() => 1), hitM = pairs(() => 1);
+      const { Q, ends } = orthoTerms([[one], [x], dummies], n);
+      const nullSep = fitOn(Q, ends[2], Y); // common-slope model: null for the slopes
+      const nullCom = fitOn(Q, ends[1], Y); // size only: null for the size-adjusted means
+      const scratch = Y.map(() => new Float64Array(Y[0].length));
+      const ge = (v, o) => v >= o - 1e-10 * Math.abs(o);
+      for (const perm of perms) {
+        const s1 = pairStats(stats(permuted(nullSep.F, nullSep.E, perm, scratch), {}));
+        const s2 = pairStats(stats(permuted(nullCom.F, nullCom.E, perm, scratch), {}));
+        for (let a = 0; a < K; a++) for (let b = 0; b < K; b++) {
+          if (a === b) continue;
+          if (ge(s1.angle[a][b], obs.angle[a][b])) hitA[a][b]++;
+          if (ge(s1.lengthDiff[a][b], obs.lengthDiff[a][b])) hitL[a][b]++;
+          if (ge(s2.lsDist[a][b], obs.lsDist[a][b])) hitM[a][b]++;
+        }
+      }
+      const N = perms.length + 1;
+      pAngle = pairs((a, b) => (a === b ? 1 : hitA[a][b] / N));
+      pLength = pairs((a, b) => (a === b ? 1 : hitL[a][b] / N));
+      pLsmean = pairs((a, b) => (a === b ? 1 : hitM[a][b] / N));
+    }
+
+    // The same summaries in shape coordinates, for drawing and predicting.
+    const st = stats(rows, {});
+    const toShape = v => Array.from({ length: p }, (_, a) => Array.from({ length: k }, (_, d) => v[a * k + d]));
+    const commonSlope = toShape(st.pooled);
+    const groups = usable.map((g, kk) => {
+      let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < n; i++) if (lab[i] === kk) { lo = Math.min(lo, x[i]); hi = Math.max(hi, x[i]); }
+      const mean = toShape(st.gy[kk]), slope = toShape(st.slopes[kk]), mx = st.gx[kk];
+      return {
+        name: levels[g], level: g, n: st.gn[kk], range: [lo, hi], meanLogSize: mx, mean, slope,
+        members: used.filter((_, i) => lab[i] === kk),
+        predict: ls => mean.map((q, a) => q.map((v, d) => v + slope[a][d] * (ls - mx))),
+        predictCommon: ls => mean.map((q, a) => q.map((v, d) => v + commonSlope[a][d] * (ls - mx))),
+      };
+    });
+    for (let a = 0; a < K; a++) for (let b = a + 1; b < K; b++) {
+      const A = groups[a].range, B = groups[b].range;
+      const overlap = Math.min(A[1], B[1]) - Math.max(A[0], B[0]);
+      if (overlap < 0.25 * Math.min(A[1] - A[0], B[1] - B[0])) notes.push(`The sizes of ${groups[a].name} and ${groups[b].name} hardly overlap, so comparing them at the same size relies on extrapolation.`);
+    }
+    const lsmeans = groups.map(g => g.predictCommon(adjustAt));
+    const meanLogSize = x.reduce((t, v) => t + v, 0) / n;
+    return {
+      levels: groups.map(g => g.name), groups, notes, unassigned: index.filter(g => !(g >= 0 && g < levels.length)).length,
+      common: commonOut, unique: uniqueOut, slopesTest: Object.assign({}, uniqueOut.terms[2]),
+      commonSlope, lsmeans, adjustAt, meanLogSize,
+      angle: obs.angle, lengthDiff: obs.lengthDiff, slopeLength: obs.len, lsmeanDist: obs.lsDist,
+      pAngle, pLength, pLsmean, permutations: perms.length,
+      residual: commonOut.residual, total: commonOut.total,
+      /** Every specimen moved along the common within-group slope to the mean log size (group differences kept). */
+      corrected: () => fit.tangent.map((c, i) => c.map((q, a) => q.map((v, d) => v - commonSlope[a][d] * (logAll[i] - meanLogSize)))),
+    };
+  }
+
   /* ---------- whole analysis ---------- */
   function analyse(dataset, opts) {
     const prep = prepare(dataset, opts);
@@ -1069,8 +1313,10 @@
     } catch (e) { return fail(e.message); }
     const allo = allometry({ tangent: g.tangent, csize: g.csize }, { permutations: 0 });
     const sizeCorrect = !!(opts && opts.sizeCorrect && allo);
-    const p = pca(sizeCorrect ? allo.corrected() : g.tangent);
-    if (sizeCorrect) p.sizeCorrected = true;
+    const sg = opts && opts.sizeGroups;
+    const byGroups = sizeCorrect && sg ? allometryByGroups({ tangent: g.tangent, csize: g.csize }, sg.index, sg.levels, { permutations: 0 }) : null;
+    const p = pca(byGroups ? byGroups.corrected() : sizeCorrect ? allo.corrected() : g.tangent);
+    if (sizeCorrect) p.sizeCorrected = byGroups ? 'groups' : true;
     if (!p.values.length) return fail('All specimens have exactly the same shape, so there is no variation to analyse.');
     return {
       ok: true, prep, gpa: g, pca: p, allometry: allo,
@@ -1082,6 +1328,6 @@
 
   return {
     tpsWarp, impute, fitRigid, symEig, centroidSize, rotateOnto, normalise, gpa, pca, shapeFromScores, shapeAt,
-    flagHigh, findMirrored, prepare, rawCoords, repeatability, analyse, groupStats, meanShape, ellipse, allometry,
+    flagHigh, findMirrored, prepare, rawCoords, repeatability, analyse, groupStats, meanShape, ellipse, allometry, allometryByGroups,
   };
 }));

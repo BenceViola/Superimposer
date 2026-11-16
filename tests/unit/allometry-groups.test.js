@@ -72,11 +72,11 @@ test('size-adjusted group means and their distances match pairwise() on the comm
 function sample(seed, groups) {
   const r = rng(seed), g = () => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r());
   const coords = [], idx = [];
-  groups.forEach(({ n, slope, shift, sizeShift }, k) => {
+  groups.forEach(({ n, slope, shift = 0, sizeShift = 0 }, k) => {
     for (let i = 0; i < n; i++) {
-      const lsz = 0.4 * g() + (sizeShift || 0), s = Math.exp(lsz);
+      const lsz = 0.4 * g() + sizeShift, s = Math.exp(lsz);
       const base = [[0, 0], [1, 0], [1, 1 + slope[0] * lsz + shift], [0, 1], [0.5, 1.5 + slope[1] * lsz]];
-      coords.push(base.map(p => [s * (p[0] + 0.015 * g()), s * (p[1] + 0.015 * g())]));
+      coords.push(base.map(p => [s * (p[0] + 0.03 * g()), s * (p[1] + 0.03 * g())]));
       idx.push(k);
     }
   });
@@ -89,7 +89,7 @@ test('different slopes are detected; parallel slopes are not, and the groups sti
   const a = GM.allometryByGroups(diff.fit, diff.idx, ['x', 'y'], { permutations: 199, seed: 1 });
   assert.ok(a.slopesTest.p <= 0.01, `slopes p ${a.slopesTest.p}`);
   assert.ok(a.angle[0][1] > 45);
-  const par = sample(2, [{ n: 20, slope: [0.4, 0], shift: 0 }, { n: 20, slope: [0.4, 0], shift: 0.15 }]);
+  const par = sample(2, [{ n: 20, slope: [0.4, 0], shift: 0 }, { n: 20, slope: [0.4, 0], shift: 0.1 }]);
   const b = GM.allometryByGroups(par.fit, par.idx, ['x', 'y'], { permutations: 199, seed: 1 });
   assert.ok(b.slopesTest.p > 0.05, `slopes p ${b.slopesTest.p}`);
   assert.ok(b.common.terms[1].p <= 0.01, `group p ${b.common.terms[1].p}`);
@@ -128,7 +128,7 @@ test('predicted shapes: each group along its own slope, and along the common slo
   g.predict(g.meanLogSize).forEach((p, i) => p.forEach((v, d) => near(v, g.mean[i][d], 1e-12)));
   const lo = g.predict(g.range[0]), hi = g.predict(g.range[1]), mid = g.predict((g.range[0] + g.range[1]) / 2);
   mid.forEach((p, i) => p.forEach((v, d) => near(v, (lo[i][d] + hi[i][d]) / 2, 1e-12)));
-  const c = g.predictCommon(a.meanLogSize);
+  const c = g.predictCommon(a.adjustAt);
   c.forEach((p, i) => p.forEach((v, d) => near(v, a.lsmeans[1][i][d], 1e-12)));
   assert.equal(a.permutations, 0);
   assert.equal(a.slopesTest.p, null);
@@ -142,11 +142,17 @@ test('size correction within groups removes the common slope but keeps the group
   let len = 0;
   for (const p of again.commonSlope) for (const v of p) len += v * v;
   assert.ok(Math.sqrt(len) < 1e-10, 'no common slope left');
-  near(again.lsmeanDist[0][1], a.lsmeanDist[0][1], 1e-10);
-  // The pooled correction would take part of the group difference with it, since the second group is larger.
+  // The plain means of the corrected shapes differ by the size-adjusted difference between the groups…
+  const meanDist = shapes => {
+    const m = [0, 1].map(g => GM.meanShape(shapes.filter((_, i) => s.idx[i] === g)));
+    let t = 0;
+    m[0].forEach((p, i) => p.forEach((v, d) => { t += (v - m[1][i][d]) ** 2; }));
+    return Math.sqrt(t);
+  };
+  near(meanDist(corrected), a.lsmeanDist[0][1], 1e-10);
+  // …while the pooled correction takes part of the group difference with it, since the second group is larger.
   const pooled = GM.allometry(s.fit, { permutations: 0 }).corrected();
-  const pooledAgain = GM.allometryByGroups({ tangent: pooled, csize: s.fit.csize }, s.idx, ['x', 'y'], { permutations: 0 });
-  assert.ok(Math.abs(pooledAgain.lsmeanDist[0][1] - a.lsmeanDist[0][1]) > 1e-3);
+  assert.ok(Math.abs(meanDist(pooled) - a.lsmeanDist[0][1]) > 1e-3);
 });
 
 test('analyse corrects for size within groups when groups are given', () => {
