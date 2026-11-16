@@ -17,7 +17,10 @@ A small browser tool for basic geometric morphometrics, made to go with [Landmar
 - **Compares groups** (the grouping chosen under *Colour by*) in a Groups tab: group means drawn over each other, the shape change from one group mean to another (or from the mean of all specimens) as arrows or a deformation grid, a table of n, mean centroid size and Procrustes variance per group, and Procrustes distances between group means with permutation tests of the distances and of differences in variance. Group means and 95% ellipses can also be shown in the PCA and size plots.
 - **Draws links** between landmarks, by clicking them or as an automatic outline or triangulation (2D). They show on every shape figure, and can be saved as a CSV to reuse or hand out.
 - **Checks** for mirrored specimens (offers to flip them), outliers, mixed units and files that don't fit the rest.
-- **Exports** scores, aligned coordinates, consensus, eigenvalues and loadings as CSV (and group means, group statistics and pairwise tests when groups are chosen), and figures as SVG or PNG.
+- **Allometry** in the Size tab: shape regressed on log centroid size (R², F and a permutation test, as geomorph's `procD.lm(coords ~ log(Csize))`), regression scores against log size (as `plotAllometry(method = "RegScore")`), and the predicted shape change from the smallest to the largest specimen. The allometry can be removed from the PCA (residuals added to the mean).
+- **Animates shape change**: a Play button moves along a PC, from one group mean to another, or from small to large, and the slider beside it scrubs by hand.
+- **Saves projects**: one zip with the data files as they were opened and every setting (groups, links, colours, flips, left-out specimens and landmarks, bilateral pairs, sliders, tab and view). Open it with *Open files* to carry on, hand out an exercise or hand in work.
+- **Exports** scores, aligned coordinates, consensus, eigenvalues and loadings as CSV (and group means, group statistics and pairwise tests when groups are chosen, and the allometry scores and predicted shapes), and figures as SVG or PNG.
 
 Other statistical tests (Procrustes ANOVA, allometry) are left to R. The exported tables are ready for it.
 
