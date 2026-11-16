@@ -115,3 +115,28 @@ out$allometry <- list(
   regscore = unname(as.vector(pa$RegScore))
 )
 write_json(out, "tests/fixtures/geomorph-reference.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
+
+# Allometry by groups: common slope (coords ~ log(Csize) + grp) and separate slopes (coords ~ log(Csize) * grp),
+# the test of slopes (anova of the two), pairwise slope angles and length differences, and distances between
+# size-adjusted group means. Same permutations as above (n = 30, iter = 99, seed = 7).
+gdf <- geomorph.data.frame(coords = g$coords, Csize = g$Csize, grp = factor(rep(c("a", "b", "c"), times = c(10, 12, 8))))
+fit.c <- procD.lm(coords ~ log(Csize) + grp, data = gdf, iter = 99, seed = 7, print.progress = FALSE)
+fit.u <- procD.lm(coords ~ log(Csize) * grp, data = gdf, iter = 99, seed = 7, print.progress = FALSE)
+an <- anova(fit.c, fit.u, print.progress = FALSE)$table
+pw.u <- pairwise(fit.u, groups = gdf$grp, covariate = log(gdf$Csize))
+vc <- summary(pw.u, test.type = "VC", angle.type = "deg")$pairwise.tables
+dl <- summary(pw.u, test.type = "DL")$pairwise.tables
+pw.c <- pairwise(fit.c, groups = gdf$grp)
+dd <- summary(pw.c, test.type = "dist")$pairwise.tables
+tabOf <- function(f) { t <- f$aov.table; list(ss = unname(t$SS), df = unname(t$Df), rsq = unname(t$Rsq), f = unname(t$F), p = unname(t$`Pr(>F)`)) }
+out <- jsonlite::fromJSON("tests/fixtures/geomorph-reference.json", simplifyVector = FALSE)
+out$allometry_groups <- list(
+  common = tabOf(fit.c), unique = tabOf(fit.u),
+  slopes_test = list(ss = unname(an$SS[2]), f = unname(an$F[2]), rsq = unname(an$Rsq[2]), p = unname(an$`Pr(>F)`[2]), df = unname(an$Df[2])),
+  slopes = unname(pw.u$slopes[[1]]),
+  angle = unname(as.matrix(vc$angle)), p_angle = unname(as.matrix(vc$P)),
+  length_diff = unname(as.matrix(dl$D)), p_length = unname(as.matrix(dl$P)),
+  lsmeans = unname(pw.c$LS.means[[1]]),
+  lsmean_dist = unname(as.matrix(dd$D)), p_lsmean = unname(as.matrix(dd$P))
+)
+write_json(out, "tests/fixtures/geomorph-reference.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
