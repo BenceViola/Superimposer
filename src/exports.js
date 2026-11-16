@@ -77,7 +77,10 @@
       res.gpa.slideIterations
         ? `Superimposition: generalised Procrustes with sliding semilandmarks, step for step as geomorph's gpagen (alignment and sliding in turns), projected to tangent space, consensus on its principal axes.`
         : `Superimposition: generalised Procrustes (full iteration), projected to tangent space, consensus on its principal axes.`,
-      `PCA: on tangent coordinates, ${res.pca.values.length} components.`,
+      res.pca.sizeCorrected
+        ? `PCA: on size-corrected tangent coordinates (allometry removed: residuals of shape on log centroid size, added to the mean), ${res.pca.values.length} components.`
+        : `PCA: on tangent coordinates, ${res.pca.values.length} components.`,
+      ...(res.allometry ? [allometryLine(res.allometry)] : []),
       `Coordinates: y points up; 2D landmark-json files were flipped to match TPS.`,
       `Units for centroid size: ${dataset.units}.`,
       `Missing data: ${opts.missing === 'points' ? 'landmarks with gaps left out' : 'specimens with gaps left out'}.`,
@@ -118,6 +121,22 @@
     return table(['key', 'point', 'method', ...axes.slice(0, k)], rows);
   }
 
+  /* ---------- allometry ---------- */
+  function allometryCSV(res) {
+    const a = res.allometry;
+    return table(['specimen', 'centroid_size', 'log_centroid_size', 'regression_score'],
+      res.prep.specimens.map((s, i) => [s.key, num(res.gpa.csize[i]), num(a.logSize[i]), num(a.score[i])]));
+  }
+  function allometryShapesCSV(res) {
+    const a = res.allometry, k = res.prep.dim, lo = a.predict(a.range[0]), hi = a.predict(a.range[1]);
+    return table(['point', 'label', ...axes.slice(0, k).map(x => `${x}_smallest`), ...axes.slice(0, k).map(x => `${x}_largest`)],
+      res.prep.rows.map((r, i) => [r.id, r.label, ...lo[i].map(num), ...hi[i].map(num)]));
+  }
+  function allometryLine(a) {
+    const test = a.permutations ? `p = ${num(Number(a.p.toFixed(4)))} (${a.permutations} permutations)` : 'no permutation test';
+    return `Allometry: shape on log centroid size (as geomorph's procD.lm): R² = ${a.rsq.toFixed(4)}, F = ${a.f.toFixed(3)}, ${test}.`;
+  }
+
   /* ---------- groups ---------- */
   function groupSummaryCSV(stats, units) {
     return table(['group', 'n', 'mean_centroid_size', 'units', 'procrustes_variance'],
@@ -150,6 +169,7 @@
         { name: 'group-pairs.csv', data: groupPairsCSV(groupRes.stats) },
         { name: 'group-means.csv', data: groupMeansCSV(groupRes.stats, res) });
     }
+    if (res.allometry) extra.push({ name: 'allometry.csv', data: allometryCSV(res) }, { name: 'allometry-shapes.csv', data: allometryShapesCSV(res) });
     if (res.gpa.slideIterations) extra.push({ name: 'sliders.csv', data: 'before,slide,after\n' + res.gpa.sliders.map(t => t.map(i => i + 1).join(',')).join('\n') + '\n' });
     let settings = settingsText(res, opts, dataset);
     if (groupRes && groupRes.stats && groupRes.stats.groups.length) settings += groupsLine(groupRes) + '\n';
@@ -163,5 +183,5 @@
     ];
   }
 
-  return { groupSummaryCSV, groupPairsCSV, groupMeansCSV, groupsLine, imputedCSV, METHOD_NAMES, scoresCSV, alignedCSV, consensusCSV, eigenCSV, loadingsCSV, repeatabilityCSV, settingsText, bundle };
+  return { allometryCSV, allometryShapesCSV, allometryLine, groupSummaryCSV, groupPairsCSV, groupMeansCSV, groupsLine, imputedCSV, METHOD_NAMES, scoresCSV, alignedCSV, consensusCSV, eigenCSV, loadingsCSV, repeatabilityCSV, settingsText, bundle };
 }));

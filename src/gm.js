@@ -982,6 +982,78 @@
     });
   }
 
+  /* ---------- allometry ---------- */
+  /**
+   * Shape regressed on log centroid size, as geomorph's procD.lm(coords ~ log(Csize)): sums of squares, R², F,
+   * and a permutation test (specimens shuffled; specimen i takes the data of perm[i]). Regression scores as
+   * plotAllometry(method = "RegScore"). fit: { tangent, csize }. Null with fewer than three specimens or one size.
+   */
+  function allometry(fit, opts) {
+    opts = opts || {};
+    const n = fit.tangent.length;
+    if (n < 3) return null;
+    const logSize = fit.csize.map(Math.log);
+    const xm = logSize.reduce((s, v) => s + v, 0) / n;
+    const x = logSize.map(v => v - xm);
+    const sxx = x.reduce((s, v) => s + v * v, 0);
+    if (!(sxx > 1e-24)) return null;
+    const mean = meanOf(fit.tangent), p = mean.length, k = mean[0].length;
+    const Y = fit.tangent.map(c => {
+      const r = new Float64Array(p * k);
+      for (let i = 0; i < p; i++) for (let d = 0; d < k; d++) r[i * k + d] = c[i][d] - mean[i][d];
+      return r;
+    });
+    const m = p * k, b = new Float64Array(m);
+    for (let a = 0; a < n; a++) for (let j = 0; j < m; j++) b[j] += (x[a] * Y[a][j]) / sxx;
+    let total = 0;
+    for (const r of Y) for (let j = 0; j < m; j++) total += r[j] * r[j];
+    let bb = 0;
+    for (let j = 0; j < m; j++) bb += b[j] * b[j];
+    const model = bb * sxx, residual = Math.max(0, total - model);
+    const F = r => (r.model / 1) / (r.residual / (n - 2));
+    const f = residual > 0 ? F({ model, residual }) : Infinity;
+    const blen = Math.sqrt(bb) || 1;
+    const score = Y.map(r => { let s = 0; for (let j = 0; j < m; j++) s += r[j] * b[j]; return s / blen; });
+    const slope = mean.map((_, i) => mean[i].map((__, d) => b[i * k + d]));
+    let lo = Infinity, hi = -Infinity;
+    for (const v of logSize) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const out = {
+      n, logSize, mean, slope, score, range: [lo, hi],
+      ss: { model, residual, total }, df: { model: 1, residual: n - 2, total: n - 1 },
+      rsq: total > 0 ? model / total : 0, f, p: null, permutations: 0,
+      predict: ls => mean.map((q, i) => q.map((v, d) => v + slope[i][d] * (ls - xm))),
+      /** Shapes with the allometric part removed (residuals added to the mean). */
+      corrected: () => fit.tangent.map((c, a) => c.map((q, i) => q.map((v, d) => v - slope[i][d] * x[a]))),
+    };
+    let perms = opts.perms;
+    if (!perms) {
+      const count = opts.permutations == null ? 999 : opts.permutations, random = seeded(opts.seed == null ? 1 : opts.seed);
+      perms = Array.from({ length: count }, () => shuffled(n, random));
+    }
+    if (!perms.length) return out;
+    // SS of the model under a permutation is wᵀ G w / sxx, with G the inner products of the centred shapes.
+    const G = Array.from({ length: n }, () => new Float64Array(n));
+    for (let a = 0; a < n; a++) for (let c = a; c < n; c++) {
+      let s = 0;
+      const ya = Y[a], yc = Y[c];
+      for (let j = 0; j < m; j++) s += ya[j] * yc[j];
+      G[a][c] = G[c][a] = s;
+    }
+    const w = new Float64Array(n);
+    let hits = 1;
+    for (const perm of perms) {
+      for (let a = 0; a < n; a++) w[perm[a]] = x[a];
+      let q = 0;
+      for (let a = 0; a < n; a++) { const Ga = G[a]; let s = 0; for (let c = 0; c < n; c++) s += Ga[c] * w[c]; q += w[a] * s; }
+      const ssm = q / sxx, ssr = Math.max(0, total - ssm);
+      const fp = ssr > 0 ? ssm / (ssr / (n - 2)) : Infinity;
+      if (fp >= f - 1e-10 * Math.abs(f)) hits++;
+    }
+    out.permutations = perms.length;
+    out.p = hits / (perms.length + 1);
+    return out;
+  }
+
   /* ---------- whole analysis ---------- */
   function analyse(dataset, opts) {
     const prep = prepare(dataset, opts);
@@ -995,10 +1067,13 @@
     try {
       g = gpa(prep.matrix, prep.sliders.length ? { sliders: prep.sliders, slide: opts && opts.slide } : {});
     } catch (e) { return fail(e.message); }
-    const p = pca(g.tangent);
+    const allo = allometry({ tangent: g.tangent, csize: g.csize }, { permutations: 0 });
+    const sizeCorrect = !!(opts && opts.sizeCorrect && allo);
+    const p = pca(sizeCorrect ? allo.corrected() : g.tangent);
+    if (sizeCorrect) p.sizeCorrected = true;
     if (!p.values.length) return fail('All specimens have exactly the same shape, so there is no variation to analyse.');
     return {
-      ok: true, prep, gpa: g, pca: p,
+      ok: true, prep, gpa: g, pca: p, allometry: allo,
       unslid: prep.sliders.length ? gpa(prep.matrix).aligned : undefined,
       mirrored: findMirrored(prep.matrix).map(i => prep.specimens[i].key),
       outliers: flagHigh(g.procD),
@@ -1007,6 +1082,6 @@
 
   return {
     tpsWarp, impute, fitRigid, symEig, centroidSize, rotateOnto, normalise, gpa, pca, shapeFromScores, shapeAt,
-    flagHigh, findMirrored, prepare, rawCoords, repeatability, analyse, groupStats, meanShape, ellipse,
+    flagHigh, findMirrored, prepare, rawCoords, repeatability, analyse, groupStats, meanShape, ellipse, allometry,
   };
 }));
