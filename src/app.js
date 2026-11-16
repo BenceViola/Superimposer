@@ -2,7 +2,7 @@
 // All calculation is in io.js, gm.js, exports.js and plots.js.
 (function () {
   'use strict';
-  const TB = window.SupTable, LK = window.SupLinks, IO = window.SupIO, GM = window.SupGM, EX = window.SupExport, PL = window.SupPlots, EXAMPLE = window.SupExample;
+  const TB = window.SupTable, LK = window.SupLinks, IO = window.SupIO, GM = window.SupGM, EX = window.SupExport, PL = window.SupPlots, EXAMPLE = window.SupExample, PJ = window.SupProject;
   const $ = id => document.getElementById(id);
   const on = (el, ev, fn) => el.addEventListener(ev, fn);
   const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -12,7 +12,7 @@
   const IDENTITY = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
 
   const S = {
-    all: [], warnings: [], refused: [], confirmTps: false, table: null,
+    all: [], warnings: [], refused: [], confirmTps: false, table: null, sources: [], projectReport: '',
     dataset: null, res: null, repeat: null,
     missing: 'specimens', replicates: 'all', semilandmarks: 'fixed', slide: 'be', sliders: [], slidersFile: '', slidersReport: '', showBefore: false,
     dataVersion: 0, assembledFrom: null, assembledTps: false, resKey: null, dragging: false,
@@ -237,6 +237,7 @@
     if (!(ok && S.fitted)) { S.editingLinks = false; S.linkStart = null; }
     $('bDownload').disabled = !(ok && S.fitted);
     $('bClear').disabled = !has;
+    $('bSaveProject').disabled = !has;
     $('bGroups').disabled = !S.all.length;
     if (!has) return;
     renderSide();
@@ -566,6 +567,7 @@
     if (S.tableReport) notes.push(S.tableReport);
     if (S.linkReport) notes.push(esc(S.linkReport));
     if (S.slidersReport) notes.push(esc(S.slidersReport));
+    if (S.projectReport) notes.push(esc(S.projectReport));
     $('issuesCard').hidden = !notes.length;
     $('issues').innerHTML = notes.map(n => `<li>${n}</li>`).join('');
 
@@ -1040,15 +1042,50 @@
   /* ---------- reading files ---------- */
   const fileBytes = f => f.arrayBuffer().then(b => new Uint8Array(b));
 
+  const zipMagic = d => d instanceof Uint8Array && d[0] === 0x50 && d[1] === 0x4b && d[2] === 3 && d[3] === 4;
   async function addFiles(fileList) {
     const files = [];
     for (const f of fileList) files.push({ name: f.name, data: await fileBytes(f) });
+    for (const f of files) {
+      if (!zipMagic(f.data)) continue;
+      let entries = null;
+      try { entries = await IO.unzipFiles(f.data); } catch { /* not readable here; loadFiles reports it */ }
+      if (entries && PJ.isProject(entries)) { await openProject(entries, f.name); return; }
+    }
+    S.sources = S.sources.concat(files);
     const r = await IO.loadFiles(files);
     S.fitted = false;
     S.all = S.all.concat(r.specimens);
     S.warnings = S.warnings.concat(r.warnings);
     S.refused = S.refused.concat(r.refused);
     rerun();
+  }
+
+  /* ---------- project files ---------- */
+  const LATER = ['links', 'styles', 'pairs', 'pairsFile', 'sliders', 'slidersFile']; // kept per landmark set, so set after the data
+  async function openProject(entries, name) {
+    const p = PJ.read(entries);
+    clearAll(false);
+    S.sources = p.files;
+    const r = await IO.loadFiles(p.files);
+    S.all = r.specimens;
+    S.warnings = r.warnings;
+    S.refused = r.refused;
+    const later = {};
+    for (const [k, v] of Object.entries(p.state)) {
+      if (LATER.includes(k)) later[k] = v;
+      else S[k] = v;
+    }
+    const fitted = S.fitted, tab = S.tab;
+    rerun();
+    Object.assign(S, later, { fitted, tab });
+    writeStored(); writeStyles(); writePairs(); writeSliders();
+    S.projectReport = `Project opened: ${name}.${p.warnings.length ? ` ${p.warnings.join(' ')}` : ''}`;
+    rerun();
+  }
+  function saveProject() {
+    const zip = PJ.build(PJ.snapshot(S), S.sources, new Date());
+    save(new Blob([zip], { type: 'application/zip' }), PJ.fileName(S.dataset && S.dataset.templateName, new Date()));
   }
 
   function useTable(text, name) {
@@ -1061,6 +1098,7 @@
   async function loadExample() {
     clearAll(false);
     const ex = EXAMPLE.make();
+    S.sources = ex.files.map(f => ({ name: f.name, data: new TextEncoder().encode(f.data) }));
     const r = await IO.loadFiles(ex.files);
     S.all = S.all.concat(r.specimens);
     S.table = IO.parseTable(ex.groups);
@@ -1069,7 +1107,7 @@
   }
 
   function clearAll(draw) {
-    Object.assign(S, { all: [], warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dtFilter: '', dtSort: null, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false, sideSort: null, dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
+    Object.assign(S, { all: [], sources: [], projectReport: '', warnings: [], refused: [], confirmTps: false, fitted: false, links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '', table: null, tableReport: '', dtFilter: '', dtSort: null, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false, sideSort: null, dataset: null, res: null, repeat: null, picked: [], analysisSig: '', shapeMode: 'axis', styles: {}, colour: '', tab: 'super', view: IDENTITY.map(r => r.slice()) });
     S.flip = new Set(); S.excludeSpecimens = new Set(); S.excludePoints = new Set();
     closeStylePop();
     $('dtFilter').value = '';
@@ -1130,6 +1168,7 @@
   on($('bExample2'), 'click', loadExample);
   on($('bGroups'), 'click', () => $('fGroups').click());
   on($('bClear'), 'click', () => clearAll());
+  on($('bSaveProject'), 'click', saveProject);
   on($('bDownload'), 'click', downloadResults);
   on($('fData'), 'change', async e => { await addFiles(e.target.files); e.target.value = ''; });
   on($('fGroups'), 'change', async e => {

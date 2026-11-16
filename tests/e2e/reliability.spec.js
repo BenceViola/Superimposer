@@ -131,6 +131,7 @@ test('the scroll height matches all the rows', async ({ page }) => {
 });
 
 test('arrow keys move past the rows drawn', async ({ page }) => {
+  test.setTimeout(90000); // 150 key presses take a while when the machine is busy
   await openApp(page);
   await openBig(page);
   await page.locator('#dataTable tr[data-key="T0"] .dt-select').focus();

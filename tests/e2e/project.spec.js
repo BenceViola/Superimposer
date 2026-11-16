@@ -38,7 +38,7 @@ test('saving and opening a project restores the data and the settings', async ({
   await expect.poll(async () => (await state(page)).n).toBe(before.n);
   expect(await state(page)).toEqual(before);
   await expect(page.locator('#plotScatter .pt').first()).toBeVisible();
-  await expect(page.locator('#message, #issues')).toContainText(/Project opened/);
+  await expect(page.locator('#issues')).toContainText(/Project opened/);
   expect(errors).toEqual([]);
 });
 
@@ -76,5 +76,5 @@ test('an ordinary zip of landmark files still opens as data', async ({ page }) =
   await dl.saveAs(p);
   await page.click('#bClear');
   await page.setInputFiles('#fData', p);
-  await expect(page.locator('#message, #issues')).not.toContainText(/Project opened/);
+  await expect(page.locator('#issues')).not.toContainText(/Project opened/);
 });

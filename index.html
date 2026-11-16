@@ -17,12 +17,13 @@
   <header class="bar">
     <div class="brand"><h1>Superimposer</h1><span class="fmt">Procrustes · PCA · landmark-json and TPS</span></div>
     <div class="grp">
-      <button class="btn primary" id="bOpen" type="button" title="Open .lmk.json, .tps or hand-in .zip files">Open files</button>
+      <button class="btn primary" id="bOpen" type="button" title="Open .lmk.json, .tps, hand-in .zip or project files">Open files</button>
       <button class="btn" id="bGroups" type="button" title="A CSV with a specimen column and one column per grouping" disabled>Add group table</button>
       <button class="btn" id="bExample" type="button" title="Load invented fish data">Example data</button>
     </div>
     <div class="grp">
       <button class="btn" id="bDownload" type="button" title="All result tables in one zip" disabled>Download results</button>
+      <button class="btn" id="bSaveProject" type="button" title="The data and every setting in one file, to open again later or share" disabled>Save project</button>
       <button class="btn" id="bClear" type="button" disabled>Clear</button>
     </div>
     <input type="file" id="fData" accept=".json,.tps,.txt,.zip,application/json,application/zip,text/plain" multiple hidden>
@@ -383,6 +384,7 @@
   <div id="dropCue" class="drop-cue" hidden>Drop to add these files</div>
 </div>
 <script src="src/io.js"></script>
+<script src="src/project.js"></script>
 <script src="src/gm.js"></script>
 <script src="src/exports.js"></script>
 <script src="src/plots.js"></script>
