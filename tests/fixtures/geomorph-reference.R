@@ -96,3 +96,22 @@ sl <- list(geomorph = as.character(packageVersion("geomorph")),
            two = slide("tests/fixtures/curves-2d.tps", "tests/fixtures/sliders-2d.csv"),
            three = slide("tests/fixtures/curves-3d.tps", "tests/fixtures/sliders-3d.csv"))
 write_json(sl, "tests/fixtures/geomorph-sliders.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
+
+# Allometry: shape on log centroid size (procD.lm), with the same permutations as the group tests,
+# and regression scores as plotAllometry(method = "RegScore").
+A <- readland.tps("tests/fixtures/synthetic-2d.tps", specID = "ID", warnmsg = FALSE)
+g <- gpagen(A, print.progress = FALSE, ProcD = FALSE, Proj = TRUE, PrinAxes = TRUE)
+gdf <- geomorph.data.frame(coords = g$coords, Csize = g$Csize)
+fit <- procD.lm(coords ~ log(Csize), data = gdf, iter = 99, seed = 7, print.progress = FALSE)
+tab <- fit$aov.table
+pdf(NULL)
+pa <- plotAllometry(fit, size = g$Csize, logsz = TRUE, method = "RegScore")
+dev.off()
+out <- jsonlite::fromJSON("tests/fixtures/geomorph-reference.json", simplifyVector = FALSE)
+out$allometry <- list(
+  ss = unname(tab$SS), df = unname(tab$Df), rsq = unname(tab$Rsq[1]), f = unname(tab$F[1]),
+  z = unname(tab$Z[1]), p = unname(tab$`Pr(>F)`[1]),
+  slope = unname(coef(fit)[2, ]),
+  regscore = unname(as.vector(pa$RegScore))
+)
+write_json(out, "tests/fixtures/geomorph-reference.json", digits = 12, auto_unbox = TRUE, matrix = "rowmajor")
