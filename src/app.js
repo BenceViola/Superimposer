@@ -717,6 +717,19 @@
     S.shapeMode = 'picked';
   }
 
+  /**
+   * The two ends of an animated shape change (and their deformation grids), so the figure keeps one frame while the
+   * slider moves. Cached per figure, since the grids take a little time.
+   */
+  const frames = new Map();
+  function frameFor(name, key, mean, ends, grid) {
+    const full = `${S.resKey}|${key}|${grid ? 'grid' : ''}`;
+    const hit = frames.get(name);
+    if (hit && hit.key === full) return hit.value;
+    const value = { frame: ends, frameWarps: grid ? ends.map(e => GM.tpsWarp(mean, e) || null) : undefined };
+    frames.set(name, { key: full, value });
+    return value;
+  }
   function shapeOptions(th) {
     const { res } = S, pc = S.shapePc;
     const col = res.pca.scores.map(r => r[pc]);
@@ -724,7 +737,10 @@
     const reach = S.shapeT >= 0 ? highest : lowest;
     const score = Math.abs(S.shapeT) * reach * S.mag;
     const sign = score >= 0 ? '+' : '';
+    const frame = frameFor('shape', `${pc}|${S.mag}`, res.gpa.consensus,
+      [GM.shapeAt(res.pca, pc, lowest * S.mag), GM.shapeAt(res.pca, pc, highest * S.mag)], useGrid());
     return {
+      ...frame,
       mean: res.gpa.consensus,
       target: GM.shapeAt(res.pca, pc, score),
       rows: res.prep.rows,
@@ -846,11 +862,16 @@
       mean = g.mean; slope = mm.model === 'separate' ? g.slope : mm.ag.commonSlope; xm = g.meanLogSize; range = g.range;
       who = g.name; fromLabel = `the mean ${g.name}`;
     }
-    const reach = S.alloT >= 0 ? range[1] - xm : range[0] - xm;
-    const L = xm + Math.abs(S.alloT) * reach * S.alloMag;
-    const target = mean.map((q, i) => q.map((v, d) => v + slope[i][d] * (L - xm)));
+    const at = t => {
+      const L = xm + Math.abs(t) * (t >= 0 ? range[1] - xm : range[0] - xm) * S.alloMag;
+      return mean.map((q, i) => q.map((v, d) => v + slope[i][d] * (L - xm)));
+    };
+    const L = xm + Math.abs(S.alloT) * (S.alloT >= 0 ? range[1] - xm : range[0] - xm) * S.alloMag;
+    const target = at(S.alloT);
+    const frame = frameFor('allo', `${mm.model}|${who}|${S.alloMag}|${S.alloGroupCache && S.alloGroupCache.key}`, mean, [at(-1), at(1)], S.alloStyle === 'grid' && res.prep.dim === 2);
     const end = S.alloMag === 1 && Math.abs(S.alloT) === 1 ? `the size of the ${S.alloT > 0 ? 'largest' : 'smallest'} ${who}` : `centroid size ${Math.exp(L).toPrecision(3)} ${unit}${mm.model !== 'pooled' ? ` (${who})` : ''}${S.alloMag > 1 ? ` (×${S.alloMag})` : ''}`;
     return {
+      ...frame,
       mean, target, fromLabel, rows: res.prep.rows, view: res.prep.dim === 3 ? S.view : null,
       links: LK.indexPairs(S.links, res.prep.rows),
       warp: S.alloStyle === 'grid' && res.prep.dim === 2 ? GM.tpsWarp(mean, target) || undefined : undefined,
@@ -1058,8 +1079,12 @@
   }
   function groupDiffOptions(th) {
     const { res } = S, { stats } = groupInfo(), { from, to } = groupEnds(stats), k = S.groupMag;
-    const target = from.shape.map((p, i) => p.map((v, d) => v + k * S.groupT * (to.shape[i][d] - v)));
+    const toward = t => from.shape.map((p, i) => p.map((v, d) => v + k * t * (to.shape[i][d] - v)));
+    const target = toward(S.groupT);
+    const grid = S.groupStyle === 'grid' && res.prep.dim === 2;
+    const frame = frameFor('groupDiff', `${S.colour}|${from.label}|${to.label}|${k}|${S.groupCache && S.groupCache.key}`, from.shape, [toward(0), toward(1)], grid);
     return {
+      ...frame,
       mean: from.shape, target, rows: res.prep.rows, view: res.prep.dim === 3 ? S.view : null,
       links: LK.indexPairs(S.links, res.prep.rows),
       warp: S.groupStyle === 'grid' && res.prep.dim === 2 ? GM.tpsWarp(from.shape, target) || undefined : undefined,

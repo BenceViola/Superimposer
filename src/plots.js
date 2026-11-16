@@ -303,7 +303,9 @@
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const s = Math.min(pw / (x1 - x0 || 1), ph / (y1 - y0 || 1)) * 0.94;
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    return p => [m.l + pw / 2 + (p[0] - cx) * s, m.t + ph / 2 - (p[1] - cy) * s];
+    const place = p => [m.l + pw / 2 + (p[0] - cx) * s, m.t + ph / 2 - (p[1] - cy) * s];
+    place.info = `${cx},${cy},${s}`;
+    return place;
   }
 
   function curveChains(rows) {
@@ -481,8 +483,12 @@
     ];
     if (o.imputed && o.imputed.length) items.push(imputedEntry(t));
     const lg = legend(items, W, t);
-    const place = fitter(lines ? [...lines.flat(), ...target] : [...mean, ...target], W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
-    let b = lg.svg;
+    // A frame (the extremes of an animation, with their grids) keeps the drawing in place while the target moves.
+    let pts = (lines ? lines.flat() : mean).concat(target);
+    for (const c of o.frame || []) pts = pts.concat(project(c, o.view));
+    if (lines) for (const w of o.frameWarps || []) if (w) pts = pts.concat(warpedGrid(mean, w).flat());
+    const place = fitter(pts, W, H, { l: 26, r: 46, t: 18 + lg.height, b: 16 });
+    let b = lg.svg + `<g class="frame-info" data-frame="${place.info}"></g>`;
     if (lines) {
       const d = lines.map(line => `M${line.map(p => { const [x, y] = place(p); return `${f(x)} ${f(y)}`; }).join('L')}`).join('');
       b += `<path class="tps-grid" d="${d}" fill="none" stroke="${t.muted}" stroke-opacity="0.55" stroke-width="0.9"/>`;
