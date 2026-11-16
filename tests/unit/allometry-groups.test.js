@@ -181,3 +181,16 @@ test('stays quick for a class-sized data set', () => {
   GM.allometryByGroups({ tangent, csize: tangent.map(() => 1 + r()) }, idx, ['a', 'b', 'c', 'd'], { permutations: 999, seed: 1 });
   assert.ok(Date.now() - t0 < 8000, `${Date.now() - t0} ms`);
 });
+
+test('tables of the models and of the pairs, and the settings line', () => {
+  const EX = require('../../src/exports.js');
+  const csv = EX.allometryGroupsCSV(ref).trim().split('\n');
+  assert.equal(csv[0], 'model,term,df,ss,rsq,f,p,permutations');
+  assert.equal(csv.length, 1 + 2 + 3);
+  assert.match(csv[1], /^common slope,size,1,/);
+  assert.match(csv[5], /^separate slopes,size × group,2,/);
+  const pairs = EX.allometryPairsCSV(ref).trim().split('\n');
+  assert.equal(pairs[0], 'group_a,group_b,slope_angle_degrees,p_angle,slope_length_difference,p_length,adjusted_mean_distance,p_adjusted_mean,permutations');
+  assert.equal(pairs.length, 1 + 3);
+  assert.match(EX.allometryGroupsLine(ref, 'form'), /^Allometry by groups \(form\): test of slopes .*F = [\d.]+, p = [\d.]+ \(99 permutations\)/);
+});

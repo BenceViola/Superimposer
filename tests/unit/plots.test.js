@@ -534,3 +534,12 @@ test('scatter: a fitted line, clipped to the data', () => {
   assert.ok(m, 'line drawn');
   assert.ok(Number(m[1]) < Number(m[3]) && Number(m[2]) > Number(m[4]), 'rising to the right');
 });
+
+test('scatter: one fitted line per group, in the group colours', () => {
+  const groups = { name: 'g', levels: ['a', 'b'], index: [0, 0, 1, 1] };
+  const s = PL.scatter({ x: [1, 2, 3, 4], y: [0, 1, 2, 3], keys: ['p', 'q', 'r', 's'], groups, xLabel: 'x', yLabel: 'y', theme: PL.THEMES.light,
+    lines: [{ g: 0, points: [[1, 0], [2, 1]] }, { g: 1, points: [[3, 2], [4, 3]] }] });
+  const lines = s.match(/<line class="fit-line"[^>]*>/g);
+  assert.equal(lines.length, 2);
+  assert.ok(lines[0].includes(PL.THEMES.light.series[0]) && lines[1].includes(PL.THEMES.light.series[1]));
+});
