@@ -1314,7 +1314,12 @@
     const allo = allometry({ tangent: g.tangent, csize: g.csize }, { permutations: 0 });
     const sizeCorrect = !!(opts && opts.sizeCorrect && allo);
     const sg = opts && opts.sizeGroups;
-    const byGroups = sizeCorrect && sg ? allometryByGroups({ tangent: g.tangent, csize: g.csize }, sg.index, sg.levels, { permutations: 0 }) : null;
+    let byGroups = null;
+    if (sizeCorrect && sg && sg.groupOf) {
+      const names = prep.specimens.map(s => sg.groupOf.get(s.key) || sg.groupOf.get(s.id) || null);
+      const levels = [...new Set(names.filter(Boolean))].sort();
+      byGroups = allometryByGroups({ tangent: g.tangent, csize: g.csize }, names.map(x => levels.indexOf(x)), levels, { permutations: 0 });
+    }
     const p = pca(byGroups ? byGroups.corrected() : sizeCorrect ? allo.corrected() : g.tangent);
     if (sizeCorrect) p.sizeCorrected = byGroups ? 'groups' : true;
     if (!p.values.length) return fail('All specimens have exactly the same shape, so there is no variation to analyse.');

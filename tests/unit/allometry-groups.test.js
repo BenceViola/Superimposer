@@ -165,8 +165,8 @@ test('analyse corrects for size within groups when groups are given', () => {
   const recs = s.fit.tangent.map((c, i) => IO.parseLmk(doc2d(`S${i}`, c.map(q => [q[0] * 100 * s.fit.csize[i] + 300, q[1] * 100 * s.fit.csize[i] + 300]), { template: t }), `S${i}`).specimens[0]);
   const ds = IO.assemble(recs);
   const keys = ds.specimens.map(x => x.key);
-  const groupOf = keys.map((_, i) => s.idx[i]);
-  const res = GM.analyse(ds, { sizeCorrect: true, sizeGroups: { index: groupOf, levels: ['x', 'y'] } });
+  const groupOf = new Map(keys.map((k, i) => [k, ['x', 'y'][s.idx[i]]]));
+  const res = GM.analyse(ds, { sizeCorrect: true, sizeGroups: { groupOf } });
   assert.equal(res.pca.sizeCorrected, 'groups');
   const pooled = GM.analyse(ds, { sizeCorrect: true });
   assert.equal(pooled.pca.sizeCorrected, true);

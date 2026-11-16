@@ -307,14 +307,25 @@
             <div class="col">
               <div class="plot-head">
                 <div class="ctrls"><label>Size against <select id="selSizePc"></select></label></div>
+                <label class="ctrls" id="alloModelRow" hidden>Allometry
+                  <select id="selAlloModel">
+                    <option value="pooled">All specimens together</option>
+                    <option value="common">Common slope within groups</option>
+                    <option value="separate">Separate slopes per group</option>
+                  </select>
+                </label>
                 <div class="exports"><button class="btn sm" data-export="svg" data-plot="size" type="button">SVG</button><button class="btn sm" data-export="png" data-plot="size" type="button">PNG</button></div>
               </div>
               <div class="plot" id="plotSize"></div>
               <p class="hint" id="alloStats"></p>
+              <p class="notice warn" id="alloWarn" hidden></p>
+              <div class="tbl-wrap"><table id="tblAllo" class="gtable"></table></div>
+              <div class="tbl-wrap"><table id="tblAlloPairs" class="gtable"></table></div>
             </div>
             <div class="col">
               <div class="plot-head">
                 <h3>Shape change with size</h3>
+                <label class="ctrls" id="alloGroupRow" hidden>Group <select id="selAlloGroup"></select></label>
                 <label class="ctrls" id="alloStyleRow">Show as
                   <select id="selAlloStyle"><option value="arrows">Arrows</option><option value="grid">Deformation grid</option></select>
                 </label>

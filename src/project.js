@@ -38,6 +38,7 @@
     groupT: between(0, 1), shapeT: between(-1, 1), alloT: between(-1, 1),
     pcX: intAtLeast(0), pcY: intAtLeast(0), shapePc: intAtLeast(0),
     sizePc: v => v === 'reg' || intAtLeast(0)(v),
+    alloModel: oneOf(['pooled', 'common', 'separate']), alloGroup: isStr,
     view: v => Array.isArray(v) && v.length === 3 && v.every(r => Array.isArray(r) && r.length === 3 && r.every(x => typeof x === 'number' && Number.isFinite(x))),
   };
   /** Collections, with their checks; sets are stored as lists. */

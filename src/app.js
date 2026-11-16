@@ -23,7 +23,7 @@
     links: [], linkSig: null, editingLinks: false, linkStart: null, linkReport: '',
     dtFilter: '', dtSort: null, dtCoords: false, dtSelected: new Set(), dtRows: [], dtMessage: '', dtArmed: null, dtRenaming: null, dtAnchor: null, autoData: false, sideSort: null,
     fitted: false, tab: 'super', pcX: 0, pcY: 1, shapePc: 0, shapeT: 1, mag: 1, sizePc: 'reg',
-    sizeCorrect: false, groupT: 1, alloT: 1, alloMag: 1, alloStyle: 'arrows', alloCache: null,
+    sizeCorrect: false, alloModel: 'pooled', alloGroup: '', alloGroupCache: null, groupT: 1, alloT: 1, alloMag: 1, alloStyle: 'arrows', alloCache: null,
     picked: [], analysisSig: '', shapeMode: 'axis', shapeStyle: 'arrows', styles: {}, styleKey: null,
     view: IDENTITY.map(r => r.slice()),
   };
@@ -45,7 +45,21 @@
   /** Sliders: loaded from a file, otherwise from the template's curves. */
   const templateSlidersNow = () => (S.dataset ? IO.templateSliders(S.dataset.rows, S.dataset.curves) : []);
   const slidersNow = () => (S.sliders.length ? S.sliders : templateSlidersNow());
-  const optsNow = () => ({ impute: imputeNow(), missing: S.missing, replicates: S.replicates, semilandmarks: S.semilandmarks, sizeCorrect: S.sizeCorrect || undefined,
+  /** With size correction and a grouping chosen, the group of each specimen (by key and by ID), for the slope within groups. */
+  function sizeGroupsNow() {
+    if (!S.sizeCorrect || !S.colour || !S.dataset) return undefined;
+    let get;
+    if (S.colour.startsWith('csv:') && S.table) {
+      const name = S.colour.slice(4), values = IO.joinGroups(S.dataset.specimens, S.table).values;
+      const byKey = new Map(S.dataset.specimens.map((s, i) => [s.key, values[i][name] || null]));
+      get = s => byKey.get(s.key);
+    } else if (S.colour === 'operator') get = s => s.operator || null;
+    else return undefined;
+    const groupOf = new Map();
+    for (const s of S.dataset.specimens) { const v = get(s); if (v) { groupOf.set(s.key, v); if (!groupOf.has(s.id)) groupOf.set(s.id, v); } }
+    return groupOf.size ? { groupOf } : undefined;
+  }
+  const optsNow = () => ({ impute: imputeNow(), missing: S.missing, replicates: S.replicates, semilandmarks: S.semilandmarks, sizeCorrect: S.sizeCorrect || undefined, sizeGroups: sizeGroupsNow(),
     slide: S.semilandmarks === 'slide' ? S.slide : undefined, sliders: S.semilandmarks === 'omit' || S.semilandmarks === 'slide' ? slidersNow() : undefined, flip: S.flip, excludeSpecimens: S.excludeSpecimens, excludePoints: S.excludePoints });
   const theme = () => {
     const forced = document.documentElement.dataset.theme;
@@ -738,9 +752,26 @@
     const selected = S.picked.filter(p => !p.virtual).map(p => p.key);
     const base = { keys, selected, styles, groups, outliers: res.outliers, tips: tip, hulls: S.hulls, rings };
     const col = c => res.pca.scores.map(r => r[c]);
+    /** Regression scores along the common slope within groups, with a line per group (its own slope, or the common one). */
+    const sizeByGroups = (theme_, extra, a, mm) => {
+      const { ag } = mm, flat = c => c.flat();
+      const b = flat(ag.commonSlope), bl = Math.sqrt(b.reduce((q, v) => q + v * v, 0)) || 1, bh = b.map(v => v / bl);
+      const ybar = flat(a.mean);
+      const score = v => v.reduce((q, x, j) => q + (x - ybar[j]) * bh[j], 0);
+      const y = res.gpa.tangent.map(c => score(flat(c)));
+      const lines = ag.groups.map(g => {
+        const slope = flat(mm.model === 'separate' ? g.slope : ag.commonSlope), m = flat(g.mean);
+        const at = L => score(m.map((v, j) => v + slope[j] * (L - g.meanLogSize)));
+        return { g: g.level, points: [[g.range[0], at(g.range[0])], [g.range[1], at(g.range[1])]] };
+      });
+      return PL.scatter(Object.assign({}, base, groupMarks(groups, a.logSize, y), { x: a.logSize, y, lines,
+        xLabel: `log centroid size (${unitWord(S.dataset.units)})`, yLabel: 'Regression score (common slope within groups)', theme: theme_ }, extra));
+    };
     const sizeRegression = (theme_, extra) => {
       const a = res.allometry;
       if (!a) return '';
+      const mm = alloModelNow();
+      if (mm.model !== 'pooled') return sizeByGroups(theme_, extra, a, mm);
       const xm = a.logSize.reduce((q, v) => q + v, 0) / a.n;
       let bl = 0;
       for (const p of a.slope) for (const v of p) bl += v * v;
@@ -792,21 +823,98 @@
     }
     return S.alloCache.a;
   }
+  /** The model chosen in the Size tab: pooled unless a grouping is chosen and the models by group can be fitted. */
+  function alloModelNow() {
+    if (S.alloModel === 'pooled' || !S.res || !S.res.ok) return { model: 'pooled' };
+    const groups = currentGroups(colourOptions());
+    if (!groups) return { model: 'pooled' };
+    const key = [S.resKey, S.colour, groups.levels.join('\u0001'), groups.index.join(','), S.perms].join('|');
+    if (!S.alloGroupCache || S.alloGroupCache.key !== key) {
+      S.alloGroupCache = { key, ag: GM.allometryByGroups({ tangent: S.res.gpa.tangent, csize: S.res.gpa.csize }, groups.index, groups.levels, { permutations: S.perms, seed: 1 }) };
+    }
+    const ag = S.alloGroupCache.ag;
+    if (!ag) return { model: 'pooled', failed: true, groups };
+    if (!ag.groups.some(g => g.name === S.alloGroup)) S.alloGroup = ag.groups[0].name;
+    return { model: S.alloModel, ag, groups, group: ag.groups.find(g => g.name === S.alloGroup) };
+  }
   function alloOptions(th) {
-    const { res } = S, a = res.allometry;
-    const xm = a.logSize.reduce((q, v) => q + v, 0) / a.n;
-    const reach = S.alloT >= 0 ? a.range[1] - xm : a.range[0] - xm;
-    const L = xm + Math.abs(S.alloT) * reach * S.alloMag;
-    const target = a.predict(L);
+    const { res } = S, a = res.allometry, mm = alloModelNow();
     const unit = unitWord(S.dataset.units);
-    const end = S.alloMag === 1 && Math.abs(S.alloT) === 1 ? `the size of the ${S.alloT > 0 ? 'largest' : 'smallest'} specimen` : `centroid size ${Math.exp(L).toPrecision(3)} ${unit}${S.alloMag > 1 ? ` (×${S.alloMag})` : ''}`;
+    let mean = a.mean, slope = a.slope, xm = a.logSize.reduce((q, v) => q + v, 0) / a.n, range = a.range, who = 'specimen', fromLabel = 'the mean shape';
+    if (mm.model !== 'pooled') {
+      const g = mm.group;
+      mean = g.mean; slope = mm.model === 'separate' ? g.slope : mm.ag.commonSlope; xm = g.meanLogSize; range = g.range;
+      who = g.name; fromLabel = `the mean ${g.name}`;
+    }
+    const reach = S.alloT >= 0 ? range[1] - xm : range[0] - xm;
+    const L = xm + Math.abs(S.alloT) * reach * S.alloMag;
+    const target = mean.map((q, i) => q.map((v, d) => v + slope[i][d] * (L - xm)));
+    const end = S.alloMag === 1 && Math.abs(S.alloT) === 1 ? `the size of the ${S.alloT > 0 ? 'largest' : 'smallest'} ${who}` : `centroid size ${Math.exp(L).toPrecision(3)} ${unit}${mm.model !== 'pooled' ? ` (${who})` : ''}${S.alloMag > 1 ? ` (×${S.alloMag})` : ''}`;
     return {
-      mean: a.mean, target, rows: res.prep.rows, view: res.prep.dim === 3 ? S.view : null,
+      mean, target, fromLabel, rows: res.prep.rows, view: res.prep.dim === 3 ? S.view : null,
       links: LK.indexPairs(S.links, res.prep.rows),
-      warp: S.alloStyle === 'grid' && res.prep.dim === 2 ? GM.tpsWarp(a.mean, target) || undefined : undefined,
-      fromLabel: 'the mean shape', targetLabel: end,
+      warp: S.alloStyle === 'grid' && res.prep.dim === 2 ? GM.tpsWarp(mean, target) || undefined : undefined,
+      targetLabel: end,
       labels: S.labels, theme: th, width: 520, height: 430,
     };
+  }
+  /** Specimens counted more than once (replicates kept separately) among the grouped ones. */
+  function replicatesCounted(groups) {
+    if (S.replicates !== 'all') return false;
+    const seen = new Set();
+    return S.res.prep.specimens.some((s, i) => {
+      if (groups.index[i] < 0) return false;
+      const k = `${s.id}~${s.operator || ''}`, dup = seen.has(k);
+      seen.add(k);
+      return dup;
+    });
+  }
+  const REPLICATE_WARNING = 'Some specimens were landmarked more than once, and each replicate counts as a separate specimen. That gives them more weight and makes the p-values too small. Set Replicates to “Average per specimen”.';
+  function renderAlloGroups(mm) {
+    const groups = currentGroups(colourOptions());
+    $('alloModelRow').hidden = !groups;
+    $('selAlloModel').value = S.alloModel;
+    const byGroups = mm.model !== 'pooled';
+    $('alloGroupRow').hidden = !byGroups;
+    const warn = [];
+    if (mm.failed) warn.push('Allometry by groups needs at least two groups with three or more specimens of different sizes.');
+    if (byGroups) {
+      const { ag } = mm, th = theme();
+      $('selAlloGroup').innerHTML = ag.groups.map(g => `<option value="${esc(g.name)}">${esc(g.name)}</option>`).join('');
+      $('selAlloGroup').value = S.alloGroup;
+      for (const n of ag.notes) warn.push(n);
+      if (replicatesCounted(mm.groups)) warn.push(REPLICATE_WARNING);
+      const t = ag.slopesTest, gTerm = ag.common.terms[1];
+      const row = (label, x) => `<tr><td>${label}</td><td class="num">${x.df}</td><td class="num">${x.rsq.toFixed(3)}</td><td class="num">${x.f == null ? '—' : x.f.toFixed(2)}</td><td class="num ${x.p != null && x.p <= 0.05 ? 'sig' : ''}">${fmtP(x.p)}</td></tr>`;
+      const head = '<thead><tr><th>Term</th><th class="num">df</th><th class="num">R²</th><th class="num">F</th><th class="num">p</th></tr></thead>';
+      const perms = ag.permutations ? `${ag.permutations} permutations of residuals (RRPP), as geomorph’s procD.lm and anova.` : 'No permutation tests: choose a number of permutations in the Groups tab.';
+      if (mm.model === 'separate') {
+        const u = ag.unique.terms;
+        $('tblAllo').innerHTML = `<caption class="note">${perms}</caption>` + head + '<tbody>' + row('Size (log centroid size)', u[0]) + row('Group', u[1]) + row('Size × group (test of slopes)', u[2]) + '</tbody>';
+        $('alloStats').textContent = t.p == null ? 'Separate slopes for each group.' : t.p <= 0.05
+          ? `The groups’ slopes differ (test of slopes p = ${fmtP(t.p)}): their shapes change with size in different ways. Compare the slopes below.`
+          : `The slopes don’t differ detectably (test of slopes p = ${fmtP(t.p)}), so a common slope within groups is a reasonable model; choose it above to compare the groups at the same size.`;
+      } else {
+        const c = ag.common.terms;
+        $('tblAllo').innerHTML = `<caption class="note">${perms}</caption>` + head + '<tbody>' + row('Size (log centroid size)', c[0]) + row('Group (at the same size)', c[1]) + '</tbody>';
+        $('alloStats').textContent = `A common slope within groups${t.p != null ? ` (the test of slopes gives p = ${fmtP(t.p)}${t.p <= 0.05 ? ', so the slopes may well differ: check the separate-slopes model' : ''})` : ''}. ${gTerm.p == null ? '' : gTerm.p <= 0.05 ? `At the same size, the groups differ in shape (p = ${fmtP(gTerm.p)}).` : `At the same size, the groups don’t differ detectably (p = ${fmtP(gTerm.p)}).`}`;
+      }
+      const G = ag.groups, pairs = [];
+      for (let a = 0; a < G.length; a++) for (let b = a + 1; b < G.length; b++) pairs.push([a, b]);
+      const pv = (m, a, b) => (m ? m[a][b] : null);
+      const cell = (p, cls) => `<td class="num ${cls} ${p != null && p <= 0.05 ? 'sig' : ''}">${fmtP(p)}</td>`;
+      const name = ([a, b]) => `<td class="gname">${PL.markerIcon({ colour: G[a].level, marker: G[a].level }, th)}${esc(G[a].name)} – ${esc(G[b].name)}</td>`;
+      $('tblAlloPairs').innerHTML = mm.model === 'separate'
+        ? '<thead><tr><th>Groups</th><th class="num" title="Angle between the two groups’ slope vectors">Angle between slopes</th><th class="num">p</th><th class="num" title="How much faster one group changes shape with size">Difference in slope length</th><th class="num">p</th></tr></thead><tbody>'
+          + pairs.map(([a, b]) => `<tr>${name([a, b])}<td class="num">${ag.angle[a][b].toFixed(1)}°</td>${cell(pv(ag.pAngle, a, b), 'p-angle')}<td class="num">${ag.lengthDiff[a][b].toExponential(2)}</td>${cell(pv(ag.pLength, a, b), 'p-length')}</tr>`).join('') + '</tbody>'
+        : '<thead><tr><th>Groups</th><th class="num" title="Procrustes distance between the group means at the same size">Distance between size-adjusted means</th><th class="num">p</th></tr></thead><tbody>'
+          + pairs.map(([a, b]) => `<tr>${name([a, b])}<td class="num">${ag.lsmeanDist[a][b].toFixed(4)}</td>${cell(pv(ag.pLsmean, a, b), 'p-mean')}</tr>`).join('') + '</tbody>';
+    } else {
+      $('tblAllo').innerHTML = '';
+      $('tblAlloPairs').innerHTML = '';
+    }
+    $('alloWarn').hidden = !warn.length;
+    $('alloWarn').textContent = warn.join(' ');
   }
   function renderSizePanel() {
     const { res } = S, a = alloInfo();
@@ -816,6 +924,7 @@
     $('alloStats').textContent = a
       ? `Shape on log centroid size: R² = ${a.rsq.toFixed(3)} (size accounts for ${(a.rsq * 100).toFixed(1)}% of shape variation), F = ${a.f.toFixed(2)}, p = ${fmtP(a.p)} (${a.permutations} permutations), as geomorph’s procD.lm(coords ~ log(Csize)). Specimens of all groups are pooled.`
       : 'Allometry needs at least three specimens of different sizes.';
+    renderAlloGroups(alloModelNow());
     $('selAlloStyle').value = S.alloStyle;
     $('alloStyleRow').hidden = res.prep.dim === 3;
     $('rngAllo').value = String(S.alloT);
@@ -990,7 +1099,9 @@
     if (S.tab === 'size') renderSizePanel();
     $('chkSizeCorrect').checked = S.sizeCorrect;
     $('morphoNote').hidden = !res.pca.sizeCorrected;
-    $('morphoNote').textContent = 'PCA on size-corrected shapes (allometry removed): the residuals of shape on log centroid size, added to the mean. The shapes along the axes leave out the shape change with size.';
+    $('morphoNote').textContent = res.pca.sizeCorrected === 'groups'
+      ? 'PCA on size-corrected shapes, with the allometry removed within groups (common slope): each specimen is moved along that slope to the mean size, so the differences between groups are kept. The shapes along the axes leave out the shape change with size.'
+      : 'PCA on size-corrected shapes (allometry removed): the residuals of shape on log centroid size, added to the mean. The shapes along the axes leave out the shape change with size.';
     const is3D = res.prep.dim === 3;
     $('plotSuper').classList.toggle('turn', is3D);
     $('plotShape').classList.toggle('turn', is3D);
@@ -1134,7 +1245,9 @@
     }
     const info = groupInfo();
     const a = alloInfo();
-    const files = EX.bundle(a ? Object.assign({}, S.res, { allometry: a }) : S.res, S.dataset, optsNow(), groups, info ? { stats: info.stats, name: info.groups.name, units: unitWord(S.dataset.units) } : undefined);
+    const mm = alloModelNow();
+    const groupRes = info ? { stats: info.stats, name: info.groups.name, units: unitWord(S.dataset.units), allometry: mm.ag } : undefined;
+    const files = EX.bundle(a ? Object.assign({}, S.res, { allometry: a }) : S.res, S.dataset, optsNow(), groups, groupRes);
     if (S.repeat.specimens.length) files.push({ name: 'repeatability.csv', data: EX.repeatabilityCSV(S.repeat) });
     if (S.links.length) files.push({ name: 'links.csv', data: LK.toCSV(S.links) });
     save(new Blob([IO.zipFiles(files)], { type: 'application/zip' }), 'superimposer-results.zip');
@@ -1411,6 +1524,8 @@
   bindChange('selSizePc', t => { S.sizePc = t.value === 'reg' ? 'reg' : Number(t.value); });
   bindChange('chkSizeCorrect', t => { S.sizeCorrect = t.checked; });
   bindChange('selAlloStyle', t => { S.alloStyle = t.value; });
+  bindChange('selAlloModel', t => { S.alloModel = t.value; });
+  bindChange('selAlloGroup', t => { S.alloGroup = t.value; });
   on($('rngAlloMag'), 'input', e => { S.alloMag = Number(e.target.value); render(); });
   for (const [name, a] of Object.entries(ANIM)) {
     on($(a.button), 'click', () => toggleAnimation(name));

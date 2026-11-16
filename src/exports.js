@@ -137,6 +137,28 @@
     return `Allometry: shape on log centroid size (as geomorph's procD.lm): R² = ${a.rsq.toFixed(4)}, F = ${a.f.toFixed(3)}, ${test}.`;
   }
 
+  function allometryGroupsCSV(ag) {
+    const rows = [];
+    for (const [model, t] of [['common slope', ag.common], ['separate slopes', ag.unique]]) {
+      for (const term of t.terms) rows.push([model, term.name, term.df, num(term.ss), num(term.rsq), term.f == null ? '' : num(term.f), term.p == null ? '' : num(term.p), ag.permutations]);
+    }
+    return table(['model', 'term', 'df', 'ss', 'rsq', 'f', 'p', 'permutations'], rows);
+  }
+  function allometryPairsCSV(ag) {
+    const rows = [], G = ag.groups, opt = (m, a, b) => (m ? num(m[a][b]) : '');
+    for (let a = 0; a < G.length; a++) for (let b = a + 1; b < G.length; b++) {
+      rows.push([G[a].name, G[b].name, num(ag.angle[a][b]), opt(ag.pAngle, a, b), num(ag.lengthDiff[a][b]), opt(ag.pLength, a, b), num(ag.lsmeanDist[a][b]), opt(ag.pLsmean, a, b), ag.permutations]);
+    }
+    return table(['group_a', 'group_b', 'slope_angle_degrees', 'p_angle', 'slope_length_difference', 'p_length', 'adjusted_mean_distance', 'p_adjusted_mean', 'permutations'], rows);
+  }
+  function allometryGroupsLine(ag, name) {
+    const t = ag.slopesTest, g = ag.common.terms[1];
+    const p = v => (v == null ? 'not tested' : num(Number(v.toFixed(4))));
+    return `Allometry by groups (${name}): test of slopes (size × group, as anova of coords ~ log(Csize) + group against coords ~ log(Csize) * group, RRPP) R² = ${t.rsq.toFixed(4)}, F = ${t.f.toFixed(3)}, p = ${p(t.p)} (${ag.permutations} permutations); `
+      + `with a common slope, group R² = ${g.rsq.toFixed(4)}, F = ${g.f.toFixed(3)}, p = ${p(g.p)}. Pairwise: angles between slopes, differences in slope length, distances between size-adjusted means (as geomorph's pairwise). Groups: ${ag.groups.map(x => `${x.name} (${x.n})`).join(', ')}.`
+      + (ag.notes.length ? ` ${ag.notes.join(' ')}` : '');
+  }
+
   /* ---------- groups ---------- */
   function groupSummaryCSV(stats, units) {
     return table(['group', 'n', 'mean_centroid_size', 'units', 'procrustes_variance'],
@@ -169,10 +191,14 @@
         { name: 'group-pairs.csv', data: groupPairsCSV(groupRes.stats) },
         { name: 'group-means.csv', data: groupMeansCSV(groupRes.stats, res) });
     }
+    if (groupRes && groupRes.allometry) {
+      extra.push({ name: 'allometry-groups.csv', data: allometryGroupsCSV(groupRes.allometry) }, { name: 'allometry-pairs.csv', data: allometryPairsCSV(groupRes.allometry) });
+    }
     if (res.allometry) extra.push({ name: 'allometry.csv', data: allometryCSV(res) }, { name: 'allometry-shapes.csv', data: allometryShapesCSV(res) });
     if (res.gpa.slideIterations) extra.push({ name: 'sliders.csv', data: 'before,slide,after\n' + res.gpa.sliders.map(t => t.map(i => i + 1).join(',')).join('\n') + '\n' });
     let settings = settingsText(res, opts, dataset);
     if (groupRes && groupRes.stats && groupRes.stats.groups.length) settings += groupsLine(groupRes) + '\n';
+    if (groupRes && groupRes.allometry) settings += allometryGroupsLine(groupRes.allometry, groupRes.name) + '\n';
     return [...extra,
       { name: 'scores.csv', data: scoresCSV(res, groups) },
       { name: 'aligned-coordinates.csv', data: alignedCSV(res) },
@@ -183,5 +209,5 @@
     ];
   }
 
-  return { allometryCSV, allometryShapesCSV, allometryLine, groupSummaryCSV, groupPairsCSV, groupMeansCSV, groupsLine, imputedCSV, METHOD_NAMES, scoresCSV, alignedCSV, consensusCSV, eigenCSV, loadingsCSV, repeatabilityCSV, settingsText, bundle };
+  return { allometryGroupsCSV, allometryPairsCSV, allometryGroupsLine, allometryCSV, allometryShapesCSV, allometryLine, groupSummaryCSV, groupPairsCSV, groupMeansCSV, groupsLine, imputedCSV, METHOD_NAMES, scoresCSV, alignedCSV, consensusCSV, eigenCSV, loadingsCSV, repeatabilityCSV, settingsText, bundle };
 }));

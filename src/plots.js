@@ -163,6 +163,7 @@
     const ellPts = [];
     for (const e of o.ellipses || []) if (e && e.points) for (const q of e.points) ellPts.push(q);
     if (o.line) for (const q of o.line) ellPts.push(q);
+    for (const l of o.lines || []) for (const q of l.points) ellPts.push(q);
     let [x0, x1] = span(o.x.concat(ellPts.map(q => q[0]))), [y0, y1] = span(o.y.concat(ellPts.map(q => q[1])));
     let sx = pw / (x1 - x0), sy = ph / (y1 - y0);
     if (o.equal) {
@@ -197,6 +198,10 @@
     if (o.line) {
       const [[a0, b0], [a1, b1]] = o.line;
       b += `<line class="fit-line" x1="${f(X(a0))}" y1="${f(Y(b0))}" x2="${f(X(a1))}" y2="${f(Y(b1))}" stroke="${t.ink}" stroke-width="1.75" stroke-opacity="0.7"/>`;
+    }
+    for (const l of o.lines || []) {
+      const [[a0, b0], [a1, b1]] = l.points;
+      b += `<line class="fit-line" x1="${f(X(a0))}" y1="${f(Y(b0))}" x2="${f(X(a1))}" y2="${f(Y(b1))}" stroke="${colourOf(t, l.g)}" stroke-width="2"/>`;
     }
     for (const e of o.ellipses || []) {
       if (!e || !e.points) continue;
