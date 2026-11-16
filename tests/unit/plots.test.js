@@ -543,3 +543,34 @@ test('scatter: one fitted line per group, in the group colours', () => {
   assert.equal(lines.length, 2);
   assert.ok(lines[0].includes(PL.THEMES.light.series[0]) && lines[1].includes(PL.THEMES.light.series[1]));
 });
+
+test('shapeChange: with a frame, the mean stays in place whatever the target (no breathing when animated)', () => {
+  const mean = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const at = k => mean.map(([x, y]) => [x * (1 + 0.3 * k), y * (1 - 0.2 * k) + 0.1 * k]);
+  const rows = mean.map((_, i) => ({ id: `L${i}`, type: 'landmark' }));
+  const means = s => [...s.matchAll(/<circle class="mean" cx="([\d.]+)" cy="([\d.]+)"/g)].map(m => [m[1], m[2]].join(','));
+  const frame = [at(-1), at(1)];
+  const draw = k => PL.shapeChange({ mean, target: at(k), rows, theme: PL.THEMES.light, frame });
+  assert.deepEqual(means(draw(-1)), means(draw(0.3)));
+  assert.deepEqual(means(draw(0.3)), means(draw(1)));
+  assert.notDeepEqual(means(PL.shapeChange({ mean, target: at(0.3), rows, theme: PL.THEMES.light })), means(draw(0.3)), 'without a frame the drawing refits');
+});
+
+test('shapeChange: with a frame, the deformation grid keeps its place too', () => {
+  const GM = require('../../src/gm.js');
+  const mean = [[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 1.3]];
+  const at = k => mean.map(([x, y], i) => [x + (i === 4 ? 0.3 * k : 0), y]);
+  const rows = mean.map((_, i) => ({ id: `L${i}`, type: 'landmark' }));
+  const frameWarps = [GM.tpsWarp(mean, at(-1)), GM.tpsWarp(mean, at(1))];
+  const draw = k => PL.shapeChange({ mean, target: at(k), rows, theme: PL.THEMES.light, warp: GM.tpsWarp(mean, at(k)), frame: [at(-1), at(1)], frameWarps });
+  const map = s => s.match(/data-map="([^"]+)"/) ? s.match(/data-map="([^"]+)"/)[1] : s.match(/<circle class="target" cx="[\d.]+"/g).length;
+  const firstPoint = s => s.match(/<circle class="target" cx="([\d.]+)" cy="([\d.]+)"/).slice(1).join(',');
+  assert.equal(firstPoint(draw(-1)), firstPoint(draw(1)), 'a fixed landmark stays put');
+  void map;
+});
+
+test('shapeChange: the fitted frame is recorded on the drawing', () => {
+  const mean = [[0, 0], [1, 0], [1, 1]];
+  const s = PL.shapeChange({ mean, target: mean, rows: mean.map((_, i) => ({ id: `L${i}`, type: 'landmark' })), theme: PL.THEMES.light });
+  assert.match(s, /<g class="frame-info" data-frame="[-\d.]+,[-\d.]+,[\d.]+"/);
+});
